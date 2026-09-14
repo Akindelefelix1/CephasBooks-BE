@@ -7,6 +7,7 @@ export interface AuthUser {
   role: string;
 }
 
-export const CurrentUser = createParamDecorator((_data: unknown, context: ExecutionContext): AuthUser =>
-  context.switchToHttp().getRequest<{ user: AuthUser }>().user,
+export const CurrentUser = createParamDecorator(
+  (_data: unknown, context: ExecutionContext): AuthUser =>
+    context.switchToHttp().getRequest<{ user: AuthUser }>().user,
 );

@@ -1,15 +1,14 @@
-FROM node:22-alpine AS dependencies
+FROM node:24-alpine AS dependencies
 WORKDIR /app
 COPY package*.json ./
+COPY prisma ./prisma
 RUN npm ci
 
 FROM dependencies AS build
-COPY prisma ./prisma
-RUN npx prisma generate
 COPY . .
 RUN npm run build
 
-FROM node:22-alpine AS production
+FROM node:24-alpine AS production
 ENV NODE_ENV=production
 WORKDIR /app
 RUN addgroup -S nodejs && adduser -S nestjs -G nodejs
