@@ -216,7 +216,14 @@ export class SalesService {
         paid = inv.paidAmount.sub(p.amount);
       await tx.invoice.update({
         where: { id: inv.id },
-        data: { paidAmount: paid, status: paid.gt(0) ? 'PARTIALLY_PAID' : 'SENT' },
+        data: {
+          paidAmount: paid,
+          status: paid.add(inv.creditedAmount).gte(inv.total)
+            ? 'PAID'
+            : paid.gt(0) || inv.creditedAmount.gt(0)
+              ? 'PARTIALLY_PAID'
+              : 'SENT',
+        },
       });
       return { reversed: true };
     });
@@ -259,7 +266,12 @@ export class SalesService {
       });
       await tx.invoice.update({
         where: { id: inv.id },
-        data: { creditedAmount: { increment: amount } },
+        data: {
+          creditedAmount: { increment: amount },
+          status: inv.paidAmount.add(inv.creditedAmount).add(amount).gte(inv.total)
+            ? 'PAID'
+            : 'PARTIALLY_PAID',
+        },
       });
       return note;
     });
@@ -271,9 +283,18 @@ export class SalesService {
       });
       if (!note) throw new NotFoundException('Credit note not found');
       await tx.creditNote.update({ where: { id }, data: { isVoid: true } });
+      const invoice = await tx.invoice.findUniqueOrThrow({ where: { id: note.invoiceId } });
+      const creditedAmount = invoice.creditedAmount.sub(note.amount);
       await tx.invoice.update({
         where: { id: note.invoiceId },
-        data: { creditedAmount: { decrement: note.amount } },
+        data: {
+          creditedAmount,
+          status: invoice.paidAmount.add(creditedAmount).gte(invoice.total)
+            ? 'PAID'
+            : invoice.paidAmount.gt(0) || creditedAmount.gt(0)
+              ? 'PARTIALLY_PAID'
+              : 'SENT',
+        },
       });
       return { voided: true };
     });

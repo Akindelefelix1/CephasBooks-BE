@@ -1,5 +1,6 @@
 ﻿import { Module } from '@nestjs/common';
 import { InvoicesController } from './invoices.controller.ts';
 import { InvoicesService } from './invoices.service.ts';
-@Module({ controllers: [InvoicesController], providers: [InvoicesService] })
+import { RolesGuard } from '../../common/guards/roles.guard.ts';
+@Module({ controllers: [InvoicesController], providers: [InvoicesService, RolesGuard] })
 export class InvoicesModule {}

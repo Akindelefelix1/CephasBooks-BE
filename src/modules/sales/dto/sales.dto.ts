@@ -3,6 +3,7 @@ import { SalesDocumentStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  ArrayMinSize,
   IsDateString,
   IsEnum,
   IsNumber,
@@ -11,6 +12,7 @@ import {
   IsUUID,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator';
 export class SalesLineDto {
   @ApiProperty() @IsString() description!: string;
@@ -25,7 +27,11 @@ export class CreateQuotationDto {
   @IsString() currency = 'NGN';
   @IsDateString() issueDate!: string;
   @IsDateString() expiryDate!: string;
-  @IsArray() items!: SalesLineDto[];
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => SalesLineDto)
+  items!: SalesLineDto[];
   @IsOptional() @IsString() @MaxLength(2000) notes?: string;
 }
 export class PaymentDto {

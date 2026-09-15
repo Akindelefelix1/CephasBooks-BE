@@ -11,6 +11,7 @@ import { MailModule } from './modules/mail/mail.module.ts';
 import { OrganizationsModule } from './modules/organizations/organizations.module.ts';
 import { BankingModule } from './modules/banking/banking.module.ts';
 import { SalesModule } from './modules/sales/sales.module.ts';
+import { PurchasesModule } from './modules/purchases/purchases.module.ts';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { SalesModule } from './modules/sales/sales.module.ts';
     InvoicesModule,
     BankingModule,
     SalesModule,
+    PurchasesModule,
   ],
 })
 export class AppModule {}

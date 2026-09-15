@@ -54,6 +54,41 @@ enum SalesDocumentStatus {
   VOID
 }
 
+enum PurchaseRequestStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+  CONVERTED
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  ISSUED
+  PARTIALLY_RECEIVED
+  RECEIVED
+  BILLED
+  CANCELLED
+}
+
+enum BillStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  VOID
+}
+
+enum ExpenseStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  VOID
+}
+
 model User {
   id                        String       @id @default(uuid()) @db.Uuid
   email                     String       @unique
@@ -73,16 +108,16 @@ model User {
 }
 
 model Organization {
-  id                    String       @id @default(uuid()) @db.Uuid
+  id                    String            @id @default(uuid()) @db.Uuid
   name                  String
-  slug                  String       @unique
-  baseCurrency          String       @default("NGN") @db.Char(3)
-  countryCode           String       @default("NG") @db.Char(2)
-  onboardingData        Json         @default("{}")
-  onboardingStep        Int          @default(0)
+  slug                  String            @unique
+  baseCurrency          String            @default("NGN") @db.Char(3)
+  countryCode           String            @default("NG") @db.Char(2)
+  onboardingData        Json              @default("{}")
+  onboardingStep        Int               @default(0)
   onboardingCompletedAt DateTime?
-  createdAt             DateTime     @default(now())
-  updatedAt             DateTime     @updatedAt
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
   memberships           Membership[]
   customers             Customer[]
   invoices              Invoice[]
@@ -92,6 +127,12 @@ model Organization {
   quotations            Quotation[]
   payments              PaymentReceived[]
   creditNotes           CreditNote[]
+  suppliers             Supplier[]
+  purchaseRequests      PurchaseRequest[]
+  purchaseOrders        PurchaseOrder[]
+  bills                 Bill[]
+  supplierPayments      SupplierPayment[]
+  expenses              Expense[]
 }
 
 model Membership {
@@ -120,8 +161,8 @@ model Session {
 }
 
 model Customer {
-  id             String       @id @default(uuid()) @db.Uuid
-  organizationId String       @db.Uuid
+  id             String            @id @default(uuid()) @db.Uuid
+  organizationId String            @db.Uuid
   displayName    String
   companyName    String?
   email          String?
@@ -129,10 +170,10 @@ model Customer {
   taxId          String?
   billingAddress String?
   notes          String?
-  isActive       Boolean      @default(true)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  isActive       Boolean           @default(true)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   invoices       Invoice[]
   quotations     Quotation[]
   payments       PaymentReceived[]
@@ -143,24 +184,24 @@ model Customer {
 }
 
 model Invoice {
-  id             String        @id @default(uuid()) @db.Uuid
-  organizationId String        @db.Uuid
-  customerId     String        @db.Uuid
+  id             String            @id @default(uuid()) @db.Uuid
+  organizationId String            @db.Uuid
+  customerId     String            @db.Uuid
   number         String
-  status         InvoiceStatus @default(DRAFT)
-  currency       String        @default("NGN") @db.Char(3)
-  issueDate      DateTime      @db.Date
-  dueDate        DateTime      @db.Date
-  subtotal       Decimal       @db.Decimal(19, 4)
-  taxTotal       Decimal       @default(0) @db.Decimal(19, 4)
-  total          Decimal       @db.Decimal(19, 4)
-  paidAmount     Decimal       @default(0) @db.Decimal(19, 4)
-  creditedAmount Decimal       @default(0) @db.Decimal(19, 4)
+  status         InvoiceStatus     @default(DRAFT)
+  currency       String            @default("NGN") @db.Char(3)
+  issueDate      DateTime          @db.Date
+  dueDate        DateTime          @db.Date
+  subtotal       Decimal           @db.Decimal(19, 4)
+  taxTotal       Decimal           @default(0) @db.Decimal(19, 4)
+  total          Decimal           @db.Decimal(19, 4)
+  paidAmount     Decimal           @default(0) @db.Decimal(19, 4)
+  creditedAmount Decimal           @default(0) @db.Decimal(19, 4)
   notes          String?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
-  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  customer       Customer      @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  customer       Customer          @relation(fields: [customerId], references: [id], onDelete: Restrict)
   items          InvoiceItem[]
   payments       PaymentReceived[]
   creditNotes    CreditNote[]
@@ -171,64 +212,67 @@ model Invoice {
 }
 
 model Quotation {
-  id String @id @default(uuid()) @db.Uuid
-  organizationId String @db.Uuid
-  customerId String @db.Uuid
-  number String
-  status SalesDocumentStatus @default(DRAFT)
-  currency String @default("NGN") @db.Char(3)
-  issueDate DateTime @db.Date
-  expiryDate DateTime @db.Date
-  subtotal Decimal @db.Decimal(19,4)
-  taxTotal Decimal @default(0) @db.Decimal(19,4)
-  total Decimal @db.Decimal(19,4)
-  items Json
-  notes String?
-  convertedInvoiceId String? @db.Uuid
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  organization Organization @relation(fields:[organizationId], references:[id], onDelete:Restrict)
-  customer Customer @relation(fields:[customerId], references:[id], onDelete:Restrict)
+  id                 String              @id @default(uuid()) @db.Uuid
+  organizationId     String              @db.Uuid
+  customerId         String              @db.Uuid
+  number             String
+  status             SalesDocumentStatus @default(DRAFT)
+  currency           String              @default("NGN") @db.Char(3)
+  issueDate          DateTime            @db.Date
+  expiryDate         DateTime            @db.Date
+  subtotal           Decimal             @db.Decimal(19, 4)
+  taxTotal           Decimal             @default(0) @db.Decimal(19, 4)
+  total              Decimal             @db.Decimal(19, 4)
+  items              Json
+  notes              String?
+  convertedInvoiceId String?             @db.Uuid
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  customer           Customer            @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
   @@unique([organizationId, number])
-  @@index([organizationId,status])
+  @@index([organizationId, status])
 }
 
 model PaymentReceived {
-  id String @id @default(uuid()) @db.Uuid
-  organizationId String @db.Uuid
-  customerId String @db.Uuid
-  invoiceId String @db.Uuid
-  reference String
-  amount Decimal @db.Decimal(19,4)
-  currency String @default("NGN") @db.Char(3)
-  paymentDate DateTime @db.Date
-  method String
-  notes String?
-  createdAt DateTime @default(now())
-  organization Organization @relation(fields:[organizationId], references:[id], onDelete:Restrict)
-  customer Customer @relation(fields:[customerId], references:[id], onDelete:Restrict)
-  invoice Invoice @relation(fields:[invoiceId], references:[id], onDelete:Restrict)
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  customerId     String       @db.Uuid
+  invoiceId      String       @db.Uuid
+  reference      String
+  amount         Decimal      @db.Decimal(19, 4)
+  currency       String       @default("NGN") @db.Char(3)
+  paymentDate    DateTime     @db.Date
+  method         String
+  notes          String?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  customer       Customer     @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  invoice        Invoice      @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+
   @@unique([organizationId, reference])
-  @@index([organizationId,paymentDate])
+  @@index([organizationId, paymentDate])
 }
 
 model CreditNote {
-  id String @id @default(uuid()) @db.Uuid
-  organizationId String @db.Uuid
-  customerId String @db.Uuid
-  invoiceId String @db.Uuid
-  number String
-  amount Decimal @db.Decimal(19,4)
-  currency String @default("NGN") @db.Char(3)
-  issueDate DateTime @db.Date
-  reason String
-  isVoid Boolean @default(false)
-  createdAt DateTime @default(now())
-  organization Organization @relation(fields:[organizationId], references:[id], onDelete:Restrict)
-  customer Customer @relation(fields:[customerId], references:[id], onDelete:Restrict)
-  invoice Invoice @relation(fields:[invoiceId], references:[id], onDelete:Restrict)
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  customerId     String       @db.Uuid
+  invoiceId      String       @db.Uuid
+  number         String
+  amount         Decimal      @db.Decimal(19, 4)
+  currency       String       @default("NGN") @db.Char(3)
+  issueDate      DateTime     @db.Date
+  reason         String
+  isVoid         Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  customer       Customer     @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  invoice        Invoice      @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+
   @@unique([organizationId, number])
-  @@index([organizationId,issueDate])
+  @@index([organizationId, issueDate])
 }
 
 model InvoiceItem {
@@ -296,14 +340,160 @@ model BankTransaction {
   notes                String?
   importFingerprint    String?
   transferGroupId      String?              @db.Uuid
+  sourceType           String?
+  sourceId             String?              @db.Uuid
   reversedAt           DateTime?
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
   organization         Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   bankAccount          BankAccount          @relation(fields: [bankAccountId], references: [id], onDelete: Restrict)
 
+  @@unique([organizationId, bankAccountId, importFingerprint])
   @@index([organizationId, transactionDate])
   @@index([bankAccountId, reconciliationStatus])
-  @@unique([organizationId, bankAccountId, importFingerprint])
   @@index([transferGroupId])
+  @@index([organizationId, sourceType, sourceId])
+}
+
+model Supplier {
+  id             String            @id @default(uuid()) @db.Uuid
+  organizationId String            @db.Uuid
+  displayName    String
+  companyName    String?
+  email          String?
+  phone          String?
+  taxId          String?
+  bankDetails    String?
+  paymentTerms   String?
+  address        String?
+  notes          String?
+  isActive       Boolean           @default(true)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  orders         PurchaseOrder[]
+  bills          Bill[]
+  payments       SupplierPayment[]
+  expenses       Expense[]
+
+  @@unique([organizationId, email])
+  @@index([organizationId, displayName])
+}
+
+model PurchaseRequest {
+  id             String                @id @default(uuid()) @db.Uuid
+  organizationId String                @db.Uuid
+  number         String
+  requestedBy    String
+  requiredDate   DateTime              @db.Date
+  status         PurchaseRequestStatus @default(DRAFT)
+  currency       String                @default("NGN") @db.Char(3)
+  items          Json
+  total          Decimal               @db.Decimal(19, 4)
+  notes          String?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  organization   Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  purchaseOrder  PurchaseOrder?
+
+  @@unique([organizationId, number])
+  @@index([organizationId, status])
+}
+
+model PurchaseOrder {
+  id             String              @id @default(uuid()) @db.Uuid
+  organizationId String              @db.Uuid
+  supplierId     String              @db.Uuid
+  requestId      String?             @unique @db.Uuid
+  number         String
+  orderDate      DateTime            @db.Date
+  deliveryDate   DateTime            @db.Date
+  status         PurchaseOrderStatus @default(DRAFT)
+  currency       String              @default("NGN") @db.Char(3)
+  items          Json
+  subtotal       Decimal             @db.Decimal(19, 4)
+  taxTotal       Decimal             @default(0) @db.Decimal(19, 4)
+  total          Decimal             @db.Decimal(19, 4)
+  notes          String?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  supplier       Supplier            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  request        PurchaseRequest?    @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  bills          Bill[]
+
+  @@unique([organizationId, number])
+  @@index([organizationId, status])
+}
+
+model Bill {
+  id              String            @id @default(uuid()) @db.Uuid
+  organizationId  String            @db.Uuid
+  supplierId      String            @db.Uuid
+  purchaseOrderId String?           @db.Uuid
+  number          String
+  issueDate       DateTime          @db.Date
+  dueDate         DateTime          @db.Date
+  status          BillStatus        @default(DRAFT)
+  currency        String            @default("NGN") @db.Char(3)
+  items           Json
+  subtotal        Decimal           @db.Decimal(19, 4)
+  taxTotal        Decimal           @default(0) @db.Decimal(19, 4)
+  total           Decimal           @db.Decimal(19, 4)
+  paidAmount      Decimal           @default(0) @db.Decimal(19, 4)
+  notes           String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  supplier        Supplier          @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  purchaseOrder   PurchaseOrder?    @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  payments        SupplierPayment[]
+
+  @@unique([organizationId, number])
+  @@index([organizationId, status, dueDate])
+}
+
+model SupplierPayment {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  supplierId     String       @db.Uuid
+  billId         String       @db.Uuid
+  bankAccountId  String?      @db.Uuid
+  reference      String
+  paymentDate    DateTime     @db.Date
+  amount         Decimal      @db.Decimal(19, 4)
+  currency       String       @default("NGN") @db.Char(3)
+  method         String
+  notes          String?
+  reversedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  supplier       Supplier     @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  bill           Bill         @relation(fields: [billId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, reference])
+  @@index([organizationId, paymentDate])
+}
+
+model Expense {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @db.Uuid
+  supplierId     String?       @db.Uuid
+  bankAccountId  String?       @db.Uuid
+  reference      String
+  expenseDate    DateTime      @db.Date
+  merchant       String
+  category       String
+  amount         Decimal       @db.Decimal(19, 4)
+  taxAmount      Decimal       @default(0) @db.Decimal(19, 4)
+  currency       String        @default("NGN") @db.Char(3)
+  status         ExpenseStatus @default(PENDING)
+  notes          String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  supplier       Supplier?     @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, reference])
+  @@index([organizationId, status, expenseDate])
 }
