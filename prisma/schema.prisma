@@ -25,6 +25,25 @@ enum InvoiceStatus {
   VOID
 }
 
+enum BankAccountType {
+  CURRENT
+  SAVINGS
+  CASH
+  CREDIT_CARD
+  OTHER
+}
+
+enum BankTransactionType {
+  MONEY_IN
+  MONEY_OUT
+}
+
+enum ReconciliationStatus {
+  UNRECONCILED
+  RECONCILED
+  EXCLUDED
+}
+
 model User {
   id                        String       @id @default(uuid()) @db.Uuid
   email                     String       @unique
@@ -58,6 +77,8 @@ model Organization {
   customers             Customer[]
   invoices              Invoice[]
   auditLogs             AuditLog[]
+  bankAccounts          BankAccount[]
+  bankTransactions      BankTransaction[]
 }
 
 model Membership {
@@ -158,4 +179,50 @@ model AuditLog {
 
   @@index([organizationId, createdAt])
   @@index([actorId, createdAt])
+}
+
+model BankAccount {
+  id                 String            @id @default(uuid()) @db.Uuid
+  organizationId     String            @db.Uuid
+  name               String
+  bankName           String?
+  accountType        BankAccountType
+  accountNumberLast4 String?
+  currency           String            @default("NGN") @db.Char(3)
+  openingBalance     Decimal           @default(0) @db.Decimal(19, 4)
+  currentBalance     Decimal           @default(0) @db.Decimal(19, 4)
+  isActive           Boolean           @default(true)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  organization       Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  transactions       BankTransaction[]
+
+  @@index([organizationId, isActive])
+}
+
+model BankTransaction {
+  id                   String               @id @default(uuid()) @db.Uuid
+  organizationId       String               @db.Uuid
+  bankAccountId        String               @db.Uuid
+  transactionDate      DateTime             @db.Date
+  description          String
+  reference            String?
+  type                 BankTransactionType
+  amount               Decimal              @db.Decimal(19, 4)
+  balanceAfter         Decimal              @db.Decimal(19, 4)
+  reconciliationStatus ReconciliationStatus @default(UNRECONCILED)
+  reconciledAt         DateTime?
+  notes                String?
+  importFingerprint    String?
+  transferGroupId      String?              @db.Uuid
+  reversedAt           DateTime?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  organization         Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  bankAccount          BankAccount          @relation(fields: [bankAccountId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, transactionDate])
+  @@index([bankAccountId, reconciliationStatus])
+  @@unique([organizationId, bankAccountId, importFingerprint])
+  @@index([transferGroupId])
 }

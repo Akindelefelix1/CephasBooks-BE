@@ -9,6 +9,7 @@ import { HealthModule } from './modules/health/health.module.ts';
 import { InvoicesModule } from './modules/invoices/invoices.module.ts';
 import { MailModule } from './modules/mail/mail.module.ts';
 import { OrganizationsModule } from './modules/organizations/organizations.module.ts';
+import { BankingModule } from './modules/banking/banking.module.ts';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { OrganizationsModule } from './modules/organizations/organizations.modul
     OrganizationsModule,
     CustomersModule,
     InvoicesModule,
+    BankingModule,
   ],
 })
 export class AppModule {}

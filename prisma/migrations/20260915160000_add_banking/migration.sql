@@ -1,0 +1,11 @@
+CREATE TYPE "BankAccountType" AS ENUM ('CURRENT', 'SAVINGS', 'CASH', 'CREDIT_CARD', 'OTHER');
+CREATE TYPE "BankTransactionType" AS ENUM ('MONEY_IN', 'MONEY_OUT');
+CREATE TYPE "ReconciliationStatus" AS ENUM ('UNRECONCILED', 'RECONCILED', 'EXCLUDED');
+CREATE TABLE "BankAccount" ("id" UUID NOT NULL,"organizationId" UUID NOT NULL,"name" TEXT NOT NULL,"bankName" TEXT,"accountType" "BankAccountType" NOT NULL,"accountNumberLast4" TEXT,"currency" CHAR(3) NOT NULL DEFAULT 'NGN',"openingBalance" DECIMAL(19,4) NOT NULL DEFAULT 0,"currentBalance" DECIMAL(19,4) NOT NULL DEFAULT 0,"isActive" BOOLEAN NOT NULL DEFAULT true,"createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,"updatedAt" TIMESTAMP(3) NOT NULL,CONSTRAINT "BankAccount_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "BankTransaction" ("id" UUID NOT NULL,"organizationId" UUID NOT NULL,"bankAccountId" UUID NOT NULL,"transactionDate" DATE NOT NULL,"description" TEXT NOT NULL,"reference" TEXT,"type" "BankTransactionType" NOT NULL,"amount" DECIMAL(19,4) NOT NULL,"balanceAfter" DECIMAL(19,4) NOT NULL,"reconciliationStatus" "ReconciliationStatus" NOT NULL DEFAULT 'UNRECONCILED',"reconciledAt" TIMESTAMP(3),"notes" TEXT,"createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,"updatedAt" TIMESTAMP(3) NOT NULL,CONSTRAINT "BankTransaction_pkey" PRIMARY KEY ("id"));
+CREATE INDEX "BankAccount_organizationId_isActive_idx" ON "BankAccount"("organizationId", "isActive");
+CREATE INDEX "BankTransaction_organizationId_transactionDate_idx" ON "BankTransaction"("organizationId", "transactionDate");
+CREATE INDEX "BankTransaction_bankAccountId_reconciliationStatus_idx" ON "BankTransaction"("bankAccountId", "reconciliationStatus");
+ALTER TABLE "BankAccount" ADD CONSTRAINT "BankAccount_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "BankTransaction" ADD CONSTRAINT "BankTransaction_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "BankTransaction" ADD CONSTRAINT "BankTransaction_bankAccountId_fkey" FOREIGN KEY ("bankAccountId") REFERENCES "BankAccount"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
