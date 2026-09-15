@@ -44,6 +44,16 @@ enum ReconciliationStatus {
   EXCLUDED
 }
 
+enum SalesDocumentStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  CONVERTED
+  VOID
+}
+
 model User {
   id                        String       @id @default(uuid()) @db.Uuid
   email                     String       @unique
@@ -79,6 +89,9 @@ model Organization {
   auditLogs             AuditLog[]
   bankAccounts          BankAccount[]
   bankTransactions      BankTransaction[]
+  quotations            Quotation[]
+  payments              PaymentReceived[]
+  creditNotes           CreditNote[]
 }
 
 model Membership {
@@ -121,6 +134,9 @@ model Customer {
   updatedAt      DateTime     @updatedAt
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   invoices       Invoice[]
+  quotations     Quotation[]
+  payments       PaymentReceived[]
+  creditNotes    CreditNote[]
 
   @@unique([organizationId, email])
   @@index([organizationId, displayName])
@@ -138,16 +154,81 @@ model Invoice {
   subtotal       Decimal       @db.Decimal(19, 4)
   taxTotal       Decimal       @default(0) @db.Decimal(19, 4)
   total          Decimal       @db.Decimal(19, 4)
+  paidAmount     Decimal       @default(0) @db.Decimal(19, 4)
+  creditedAmount Decimal       @default(0) @db.Decimal(19, 4)
   notes          String?
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
   organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   customer       Customer      @relation(fields: [customerId], references: [id], onDelete: Restrict)
   items          InvoiceItem[]
+  payments       PaymentReceived[]
+  creditNotes    CreditNote[]
 
   @@unique([organizationId, number])
   @@index([organizationId, status])
   @@index([customerId])
+}
+
+model Quotation {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  customerId String @db.Uuid
+  number String
+  status SalesDocumentStatus @default(DRAFT)
+  currency String @default("NGN") @db.Char(3)
+  issueDate DateTime @db.Date
+  expiryDate DateTime @db.Date
+  subtotal Decimal @db.Decimal(19,4)
+  taxTotal Decimal @default(0) @db.Decimal(19,4)
+  total Decimal @db.Decimal(19,4)
+  items Json
+  notes String?
+  convertedInvoiceId String? @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  organization Organization @relation(fields:[organizationId], references:[id], onDelete:Restrict)
+  customer Customer @relation(fields:[customerId], references:[id], onDelete:Restrict)
+  @@unique([organizationId, number])
+  @@index([organizationId,status])
+}
+
+model PaymentReceived {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  customerId String @db.Uuid
+  invoiceId String @db.Uuid
+  reference String
+  amount Decimal @db.Decimal(19,4)
+  currency String @default("NGN") @db.Char(3)
+  paymentDate DateTime @db.Date
+  method String
+  notes String?
+  createdAt DateTime @default(now())
+  organization Organization @relation(fields:[organizationId], references:[id], onDelete:Restrict)
+  customer Customer @relation(fields:[customerId], references:[id], onDelete:Restrict)
+  invoice Invoice @relation(fields:[invoiceId], references:[id], onDelete:Restrict)
+  @@unique([organizationId, reference])
+  @@index([organizationId,paymentDate])
+}
+
+model CreditNote {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  customerId String @db.Uuid
+  invoiceId String @db.Uuid
+  number String
+  amount Decimal @db.Decimal(19,4)
+  currency String @default("NGN") @db.Char(3)
+  issueDate DateTime @db.Date
+  reason String
+  isVoid Boolean @default(false)
+  createdAt DateTime @default(now())
+  organization Organization @relation(fields:[organizationId], references:[id], onDelete:Restrict)
+  customer Customer @relation(fields:[customerId], references:[id], onDelete:Restrict)
+  invoice Invoice @relation(fields:[invoiceId], references:[id], onDelete:Restrict)
+  @@unique([organizationId, number])
+  @@index([organizationId,issueDate])
 }
 
 model InvoiceItem {
