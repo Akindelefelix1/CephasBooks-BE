@@ -24,6 +24,7 @@ const schema = z.object({
     (value) => (value === '' ? undefined : value),
     z.string().min(3).optional(),
   ),
+  FRONTEND_URL: z.string().url().default('https://cephas-books.onrender.com'),
 });
 
 export type Environment = z.infer<typeof schema>;

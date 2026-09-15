@@ -16,11 +16,22 @@ const COUNTRY_CODES: Record<string, string> = {
 export class OrganizationsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  getOnboarding(organizationId: string) {
-    return this.prisma.organization.findUniqueOrThrow({
+  async getOnboarding(organizationId: string) {
+    const organization = await this.prisma.organization.findUniqueOrThrow({
       where: { id: organizationId },
-      select: { onboardingData: true, onboardingStep: true, onboardingCompletedAt: true },
+      select: {
+        name: true,
+        onboardingData: true,
+        onboardingStep: true,
+        onboardingCompletedAt: true,
+      },
     });
+    return {
+      organizationName: organization.name,
+      onboardingData: organization.onboardingData,
+      onboardingStep: organization.onboardingStep,
+      onboardingCompletedAt: organization.onboardingCompletedAt,
+    };
   }
 
   async saveOnboardingStep(organizationId: string, step: StepName, payload: object) {

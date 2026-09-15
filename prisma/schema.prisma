@@ -26,21 +26,21 @@ enum InvoiceStatus {
 }
 
 model User {
-  id           String       @id @default(uuid()) @db.Uuid
-  email        String       @unique
-  passwordHash String
-  firstName    String
-  lastName     String
-  isActive     Boolean      @default(true)
-  verifiedAt   DateTime?
+  id                        String       @id @default(uuid()) @db.Uuid
+  email                     String       @unique
+  passwordHash              String
+  firstName                 String?
+  lastName                  String?
+  isActive                  Boolean      @default(true)
+  verifiedAt                DateTime?
   verificationCodeHash      String?
   verificationCodeExpiresAt DateTime?
   verificationCodeSentAt    DateTime?
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  memberships  Membership[]
-  sessions     Session[]
-  auditLogs    AuditLog[]
+  createdAt                 DateTime     @default(now())
+  updatedAt                 DateTime     @updatedAt
+  memberships               Membership[]
+  sessions                  Session[]
+  auditLogs                 AuditLog[]
 }
 
 model Organization {

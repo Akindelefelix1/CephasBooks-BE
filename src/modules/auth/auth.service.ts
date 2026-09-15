@@ -1,6 +1,6 @@
 ﻿import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ForbiddenException, HttpException, HttpStatus } from '@nestjs/common';
+import { ForbiddenException, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Prisma, Role } from '@prisma/client';
 import * as argon2 from 'argon2';
@@ -8,6 +8,10 @@ import { createHash, randomBytes, randomInt } from 'node:crypto';
 import type { SignOptions } from 'jsonwebtoken';
 import { PrismaService } from '../../database/prisma.service.ts';
 import { MailService } from '../mail/mail.service.ts';
+import {
+  accountVerifiedEmailTemplate,
+  verificationEmailTemplate,
+} from '../mail/templates/auth-email.templates.ts';
 import { LoginDto } from './dto/login.dto.ts';
 import { RegisterDto } from './dto/register.dto.ts';
 import { VerifyEmailDto } from './dto/verify-email.dto.ts';
@@ -26,6 +30,8 @@ export interface VerificationPending {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
@@ -45,8 +51,6 @@ export class AuthService {
           data: {
             email,
             passwordHash: await argon2.hash(dto.password),
-            firstName: dto.firstName.trim(),
-            lastName: dto.lastName.trim(),
           },
         });
         const organization = await tx.organization.create({
@@ -57,7 +61,12 @@ export class AuthService {
         });
         return { user, organization };
       });
-      await this.createAndSendVerificationCode(result.user.id, email);
+      await this.createAndSendVerificationCode(
+        result.user.id,
+        email,
+        result.organization.name,
+        result.organization.name,
+      );
       return { email, verificationRequired: true, expiresIn: 600 };
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
@@ -78,11 +87,27 @@ export class AuthService {
     return this.issueTokens(user.id, user.email, membership.organizationId, membership.role);
   }
 
+  async getProfile(userId: string, organizationId: string, role: string) {
+    const [user, organization] = await Promise.all([
+      this.prisma.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: { firstName: true, lastName: true, email: true },
+      }),
+      this.prisma.organization.findUniqueOrThrow({
+        where: { id: organizationId },
+        select: { name: true, baseCurrency: true, countryCode: true },
+      }),
+    ]);
+    return { ...user, role, organization };
+  }
+
   async verifyEmail(dto: VerifyEmailDto): Promise<Tokens> {
     const email = dto.email.trim().toLowerCase();
     const user = await this.prisma.user.findUnique({
       where: { email },
-      include: { memberships: { take: 1 } },
+      include: {
+        memberships: { take: 1, include: { organization: { select: { name: true } } } },
+      },
     });
     const membership = user?.memberships[0];
     const valid =
@@ -100,12 +125,32 @@ export class AuthService {
         verificationCodeExpiresAt: null,
       },
     });
+    try {
+      await this.mail.send({
+        to: user.email,
+        subject: 'Your Cephas Books account is verified',
+        html: accountVerifiedEmailTemplate({
+          firstName: user.firstName ?? membership.organization.name,
+          organizationName: membership.organization.name,
+          appUrl: this.config.get<string>('FRONTEND_URL') ?? 'https://cephas-books.onrender.com',
+        }),
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Account verified, but confirmation email failed for user ${user.id}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     return this.issueTokens(user.id, user.email, membership.organizationId, membership.role);
   }
 
   async resendVerification(rawEmail: string): Promise<{ message: string; expiresIn: number }> {
     const email = rawEmail.trim().toLowerCase();
-    const user = await this.prisma.user.findUnique({ where: { email } });
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+      include: {
+        memberships: { take: 1, include: { organization: { select: { name: true } } } },
+      },
+    });
     const message = 'If this email needs verification, a new code has been sent.';
     if (!user || user.verifiedAt) return { message, expiresIn: 600 };
     if (
@@ -117,7 +162,12 @@ export class AuthService {
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
-    await this.createAndSendVerificationCode(user.id, email);
+    await this.createAndSendVerificationCode(
+      user.id,
+      email,
+      user.firstName ?? user.memberships[0]?.organization.name ?? 'there',
+      user.memberships[0]?.organization.name ?? 'your organisation',
+    );
     return { message, expiresIn: 600 };
   }
 
@@ -191,7 +241,12 @@ export class AuthService {
     return createHash('sha256').update(token).digest('hex');
   }
 
-  private async createAndSendVerificationCode(userId: string, email: string): Promise<void> {
+  private async createAndSendVerificationCode(
+    userId: string,
+    email: string,
+    firstName: string,
+    organizationName: string,
+  ): Promise<void> {
     const code = randomInt(100000, 1000000).toString();
     const now = new Date();
     await this.prisma.user.update({
@@ -203,8 +258,13 @@ export class AuthService {
     });
     await this.mail.send({
       to: email,
-      subject: 'Verify your Cephas Books email',
-      html: `<p>Your Cephas Books verification code is:</p><p style="font-size:28px;font-weight:700;letter-spacing:6px">${code}</p><p>This code expires in 10 minutes.</p>`,
+      subject: `${firstName}, verify your Cephas Books account`,
+      html: verificationEmailTemplate({
+        firstName,
+        organizationName,
+        code,
+        appUrl: this.config.get<string>('FRONTEND_URL') ?? 'https://cephas-books.onrender.com',
+      }),
     });
     await this.prisma.user.update({
       where: { id: userId },
