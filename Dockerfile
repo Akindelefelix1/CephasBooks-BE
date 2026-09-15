@@ -18,4 +18,4 @@ COPY --from=build /app/prisma ./prisma
 COPY package*.json ./
 USER nestjs
 EXPOSE 3000
-CMD ["sh", "-c", "npx prisma migrate deploy && exec node dist/main.js"]
+CMD ["node", "dist/main.js"]

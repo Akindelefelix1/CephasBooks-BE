@@ -29,7 +29,10 @@ export class VerificationEmailService {
       }),
     });
     if (!response.ok) {
-      this.logger.error(`Verification email provider returned ${response.status}`);
+      const providerMessage = await response.text();
+      this.logger.error(
+        `Verification email provider returned ${response.status}: ${providerMessage.slice(0, 1000)}`,
+      );
       throw new ServiceUnavailableException('Unable to send verification email');
     }
   }
