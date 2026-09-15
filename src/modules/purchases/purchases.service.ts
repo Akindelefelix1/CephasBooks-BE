@@ -102,6 +102,26 @@ export class PurchasesService {
     await this.supplier(org, id);
     return this.db.supplier.update({ where: { id }, data: { isActive: false } });
   }
+  async deleteSupplier(org: string, id: string) {
+    const supplier = await this.supplier(org, id);
+    if (supplier.isActive) throw new BadRequestException('Archive the supplier before deleting it');
+    const [orders, bills, payments, expenses] = await this.db.$transaction([
+      this.db.purchaseOrder.count({ where: { organizationId: org, supplierId: id } }),
+      this.db.bill.count({ where: { organizationId: org, supplierId: id } }),
+      this.db.supplierPayment.count({ where: { organizationId: org, supplierId: id } }),
+      this.db.expense.count({ where: { organizationId: org, supplierId: id } }),
+    ]);
+    if (orders || bills || payments || expenses)
+      throw new BadRequestException(
+        'This supplier has financial history and cannot be permanently deleted',
+      );
+    await this.db.supplier.delete({ where: { id } });
+    return { deleted: true };
+  }
+  async restoreSupplier(org: string, id: string) {
+    await this.supplier(org, id);
+    return this.db.supplier.update({ where: { id }, data: { isActive: true } });
+  }
   private async supplier(org: string, id: string) {
     const x = await this.db.supplier.findFirst({ where: { id, organizationId: org } });
     if (!x) throw new NotFoundException('Supplier not found');

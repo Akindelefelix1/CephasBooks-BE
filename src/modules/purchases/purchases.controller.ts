@@ -58,6 +58,16 @@ export class PurchasesController {
   ) {
     return this.s.archiveSupplier(u.organizationId, id);
   }
+  @Roles(Role.OWNER, Role.ADMIN)
+  @Delete('suppliers/:id/permanent')
+  deleteSupplier(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.s.deleteSupplier(u.organizationId, id);
+  }
+  @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT)
+  @Patch('suppliers/:id/restore')
+  restoreSupplier(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.s.restoreSupplier(u.organizationId, id);
+  }
   @Get('requests') requests(@CurrentUser() u: AuthUser, @Query() q: Record<string, string>) {
     return this.s.requests(u.organizationId, q);
   }
