@@ -89,6 +89,27 @@ enum ExpenseStatus {
   VOID
 }
 
+enum LedgerAccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  INCOME
+  EXPENSE
+}
+
+enum JournalStatus {
+  DRAFT
+  POSTED
+  REVERSED
+}
+
+enum FinanceRecordKind {
+  ASSET
+  BUDGET
+  TAX
+  PAYROLL
+}
+
 model User {
   id                        String       @id @default(uuid()) @db.Uuid
   email                     String       @unique
@@ -133,6 +154,9 @@ model Organization {
   bills                 Bill[]
   supplierPayments      SupplierPayment[]
   expenses              Expense[]
+  ledgerAccounts        LedgerAccount[]
+  journals              Journal[]
+  financeRecords        FinanceRecord[]
 }
 
 model Membership {
@@ -496,4 +520,59 @@ model Expense {
 
   @@unique([organizationId, reference])
   @@index([organizationId, status, expenseDate])
+}
+
+model LedgerAccount {
+  id             String            @id @default(uuid()) @db.Uuid
+  organizationId String            @db.Uuid
+  code           String
+  name           String
+  type           LedgerAccountType
+  description    String?
+  isActive       Boolean           @default(true)
+  isSystem       Boolean           @default(false)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, code])
+  @@index([organizationId, type, isActive])
+}
+
+model Journal {
+  id                String        @id @default(uuid()) @db.Uuid
+  organizationId    String        @db.Uuid
+  number            String
+  journalDate       DateTime      @db.Date
+  description       String
+  status            JournalStatus @default(DRAFT)
+  lines             Json
+  total             Decimal       @db.Decimal(19, 4)
+  reversedJournalId String?       @db.Uuid
+  postedAt          DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  organization      Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, number])
+  @@index([organizationId, status, journalDate])
+}
+
+model FinanceRecord {
+  id             String            @id @default(uuid()) @db.Uuid
+  organizationId String            @db.Uuid
+  kind           FinanceRecordKind
+  reference      String
+  name           String
+  startDate      DateTime          @db.Date
+  endDate        DateTime?         @db.Date
+  amount         Decimal           @db.Decimal(19, 4)
+  status         String
+  data           Json              @default("{}")
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, kind, reference])
+  @@index([organizationId, kind, status])
 }
