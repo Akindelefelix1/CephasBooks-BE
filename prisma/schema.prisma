@@ -33,6 +33,9 @@ model User {
   lastName     String
   isActive     Boolean      @default(true)
   verifiedAt   DateTime?
+  verificationCodeHash      String?
+  verificationCodeExpiresAt DateTime?
+  verificationCodeSentAt    DateTime?
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
   memberships  Membership[]
@@ -41,17 +44,20 @@ model User {
 }
 
 model Organization {
-  id           String       @id @default(uuid()) @db.Uuid
-  name         String
-  slug         String       @unique
-  baseCurrency String       @default("NGN") @db.Char(3)
-  countryCode  String       @default("NG") @db.Char(2)
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  memberships  Membership[]
-  customers    Customer[]
-  invoices     Invoice[]
-  auditLogs    AuditLog[]
+  id                    String       @id @default(uuid()) @db.Uuid
+  name                  String
+  slug                  String       @unique
+  baseCurrency          String       @default("NGN") @db.Char(3)
+  countryCode           String       @default("NG") @db.Char(2)
+  onboardingData        Json         @default("{}")
+  onboardingStep        Int          @default(0)
+  onboardingCompletedAt DateTime?
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+  memberships           Membership[]
+  customers             Customer[]
+  invoices              Invoice[]
+  auditLogs             AuditLog[]
 }
 
 model Membership {

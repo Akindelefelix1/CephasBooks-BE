@@ -12,6 +12,14 @@ const schema = z.object({
   CORS_ORIGINS: z.string().default('http://localhost:5173'),
   SWAGGER_ENABLED: z.enum(['true', 'false']).default('true'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+  RESEND_API_KEY: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.string().min(1).optional(),
+  ),
+  EMAIL_FROM: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.string().min(3).optional(),
+  ),
 });
 
 export type Environment = z.infer<typeof schema>;

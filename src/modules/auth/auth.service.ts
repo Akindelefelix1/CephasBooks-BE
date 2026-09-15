@@ -1,17 +1,26 @@
 ﻿import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { ForbiddenException, HttpException, HttpStatus } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Prisma, Role } from '@prisma/client';
 import * as argon2 from 'argon2';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomInt } from 'node:crypto';
 import type { SignOptions } from 'jsonwebtoken';
 import { PrismaService } from '../../database/prisma.service.ts';
 import { LoginDto } from './dto/login.dto.ts';
 import { RegisterDto } from './dto/register.dto.ts';
+import { VerifyEmailDto } from './dto/verify-email.dto.ts';
+import { VerificationEmailService } from './verification-email.service.ts';
 
 export interface Tokens {
   accessToken: string;
   refreshToken: string;
+  expiresIn: number;
+}
+
+export interface VerificationPending {
+  email: string;
+  verificationRequired: true;
   expiresIn: number;
 }
 
@@ -21,9 +30,10 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
+    private readonly verificationEmail: VerificationEmailService,
   ) {}
 
-  async register(dto: RegisterDto): Promise<Tokens> {
+  async register(dto: RegisterDto): Promise<VerificationPending> {
     const email = dto.email.trim().toLowerCase();
     const slug = `${dto.organizationName
       .toLowerCase()
@@ -47,7 +57,8 @@ export class AuthService {
         });
         return { user, organization };
       });
-      return this.issueTokens(result.user.id, email, result.organization.id, Role.OWNER);
+      await this.createAndSendVerificationCode(result.user.id, email);
+      return { email, verificationRequired: true, expiresIn: 600 };
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
         throw new ConflictException('Email is already registered');
@@ -63,7 +74,51 @@ export class AuthService {
     const valid = user && user.isActive && (await argon2.verify(user.passwordHash, dto.password));
     const membership = user?.memberships[0];
     if (!valid || !user || !membership) throw new UnauthorizedException('Invalid credentials');
+    if (!user.verifiedAt) throw new ForbiddenException('Email verification required');
     return this.issueTokens(user.id, user.email, membership.organizationId, membership.role);
+  }
+
+  async verifyEmail(dto: VerifyEmailDto): Promise<Tokens> {
+    const email = dto.email.trim().toLowerCase();
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+      include: { memberships: { take: 1 } },
+    });
+    const membership = user?.memberships[0];
+    const valid =
+      user?.verificationCodeHash === this.hashToken(dto.code) &&
+      user.verificationCodeExpiresAt &&
+      user.verificationCodeExpiresAt > new Date();
+    if (!user || !membership || !valid) {
+      throw new UnauthorizedException('The verification code is invalid or has expired');
+    }
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        verifiedAt: user.verifiedAt ?? new Date(),
+        verificationCodeHash: null,
+        verificationCodeExpiresAt: null,
+      },
+    });
+    return this.issueTokens(user.id, user.email, membership.organizationId, membership.role);
+  }
+
+  async resendVerification(rawEmail: string): Promise<{ message: string; expiresIn: number }> {
+    const email = rawEmail.trim().toLowerCase();
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    const message = 'If this email needs verification, a new code has been sent.';
+    if (!user || user.verifiedAt) return { message, expiresIn: 600 };
+    if (
+      user.verificationCodeSentAt &&
+      Date.now() - user.verificationCodeSentAt.getTime() < 60_000
+    ) {
+      throw new HttpException(
+        'Please wait before requesting another code',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+    await this.createAndSendVerificationCode(user.id, email);
+    return { message, expiresIn: 600 };
   }
 
   async refresh(rawToken: string): Promise<Tokens> {
@@ -134,5 +189,22 @@ export class AuthService {
 
   private hashToken(token: string): string {
     return createHash('sha256').update(token).digest('hex');
+  }
+
+  private async createAndSendVerificationCode(userId: string, email: string): Promise<void> {
+    const code = randomInt(100000, 1000000).toString();
+    const now = new Date();
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        verificationCodeHash: this.hashToken(code),
+        verificationCodeExpiresAt: new Date(now.getTime() + 10 * 60_000),
+      },
+    });
+    await this.verificationEmail.sendCode(email, code);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { verificationCodeSentAt: now },
+    });
   }
 }

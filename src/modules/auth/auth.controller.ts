@@ -6,6 +6,7 @@ import { AuthService } from './auth.service.ts';
 import { LoginDto } from './dto/login.dto.ts';
 import { RefreshDto } from './dto/refresh.dto.ts';
 import { RegisterDto } from './dto/register.dto.ts';
+import { ResendVerificationDto, VerifyEmailDto } from './dto/verify-email.dto.ts';
 
 @ApiTags('Authentication')
 @Controller('auth')
@@ -13,6 +14,14 @@ export class AuthController {
   constructor(private readonly auth: AuthService) {}
   @Post('register') register(@Body() dto: RegisterDto) {
     return this.auth.register(dto);
+  }
+  @HttpCode(HttpStatus.OK) @Post('verify-email') verifyEmail(@Body() dto: VerifyEmailDto) {
+    return this.auth.verifyEmail(dto);
+  }
+  @HttpCode(HttpStatus.OK) @Post('resend-verification') resendVerification(
+    @Body() dto: ResendVerificationDto,
+  ) {
+    return this.auth.resendVerification(dto.email);
   }
   @HttpCode(HttpStatus.OK) @Post('login') login(@Body() dto: LoginDto) {
     return this.auth.login(dto);
