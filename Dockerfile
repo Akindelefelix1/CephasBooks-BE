@@ -18,4 +18,4 @@ COPY --from=build /app/prisma ./prisma
 COPY package*.json ./
 USER nestjs
 EXPOSE 3000
-CMD ["node", "dist/main.js"]
+CMD ["npm", "run", "start:prod"]
