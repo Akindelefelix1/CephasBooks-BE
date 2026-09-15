@@ -24,7 +24,7 @@ async function bootstrap(): Promise<void> {
     origin: config
       .getOrThrow<string>('CORS_ORIGINS')
       .split(',')
-      .map((origin) => origin.trim()),
+      .map((origin) => origin.trim().replace(/\/+$/, '')),
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
   });
