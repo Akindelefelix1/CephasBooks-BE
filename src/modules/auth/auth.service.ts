@@ -7,10 +7,10 @@ import * as argon2 from 'argon2';
 import { createHash, randomBytes, randomInt } from 'node:crypto';
 import type { SignOptions } from 'jsonwebtoken';
 import { PrismaService } from '../../database/prisma.service.ts';
+import { MailService } from '../mail/mail.service.ts';
 import { LoginDto } from './dto/login.dto.ts';
 import { RegisterDto } from './dto/register.dto.ts';
 import { VerifyEmailDto } from './dto/verify-email.dto.ts';
-import { VerificationEmailService } from './verification-email.service.ts';
 
 export interface Tokens {
   accessToken: string;
@@ -30,7 +30,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
-    private readonly verificationEmail: VerificationEmailService,
+    private readonly mail: MailService,
   ) {}
 
   async register(dto: RegisterDto): Promise<VerificationPending> {
@@ -201,7 +201,11 @@ export class AuthService {
         verificationCodeExpiresAt: new Date(now.getTime() + 10 * 60_000),
       },
     });
-    await this.verificationEmail.sendCode(email, code);
+    await this.mail.send({
+      to: email,
+      subject: 'Verify your Cephas Books email',
+      html: `<p>Your Cephas Books verification code is:</p><p style="font-size:28px;font-weight:700;letter-spacing:6px">${code}</p><p>This code expires in 10 minutes.</p>`,
+    });
     await this.prisma.user.update({
       where: { id: userId },
       data: { verificationCodeSentAt: now },

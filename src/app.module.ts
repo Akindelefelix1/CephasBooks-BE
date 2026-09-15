@@ -7,6 +7,7 @@ import { AuthModule } from './modules/auth/auth.module.ts';
 import { CustomersModule } from './modules/customers/customers.module.ts';
 import { HealthModule } from './modules/health/health.module.ts';
 import { InvoicesModule } from './modules/invoices/invoices.module.ts';
+import { MailModule } from './modules/mail/mail.module.ts';
 import { OrganizationsModule } from './modules/organizations/organizations.module.ts';
 
 @Module({
@@ -25,6 +26,7 @@ import { OrganizationsModule } from './modules/organizations/organizations.modul
     }),
     DatabaseModule,
     HealthModule,
+    MailModule,
     AuthModule,
     OrganizationsModule,
     CustomersModule,

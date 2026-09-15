@@ -4,7 +4,7 @@ import { jest } from '@jest/globals';
 import { JwtService } from '@nestjs/jwt';
 import { AuthService } from './auth.service.ts';
 import { PrismaService } from '../../database/prisma.service.ts';
-import { VerificationEmailService } from './verification-email.service.ts';
+import { MailService } from '../mail/mail.service.ts';
 
 describe('AuthService', () => {
   it('rejects unknown credentials without revealing which field failed', async () => {
@@ -17,7 +17,7 @@ describe('AuthService', () => {
         },
         { provide: JwtService, useValue: {} },
         { provide: ConfigService, useValue: {} },
-        { provide: VerificationEmailService, useValue: { sendCode: jest.fn() } },
+        { provide: MailService, useValue: { send: jest.fn() } },
       ],
     }).compile();
     await expect(

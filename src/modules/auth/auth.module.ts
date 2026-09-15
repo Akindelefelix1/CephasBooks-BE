@@ -5,7 +5,6 @@ import { PassportModule } from '@nestjs/passport';
 import { AuthController } from './auth.controller.ts';
 import { AuthService } from './auth.service.ts';
 import { JwtStrategy } from './jwt.strategy.ts';
-import { VerificationEmailService } from './verification-email.service.ts';
 
 @Module({
   imports: [
@@ -13,7 +12,7 @@ import { VerificationEmailService } from './verification-email.service.ts';
     JwtModule.registerAsync({ inject: [ConfigService], useFactory: () => ({}) }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, VerificationEmailService],
+  providers: [AuthService, JwtStrategy],
   exports: [AuthService],
 })
 export class AuthModule {}

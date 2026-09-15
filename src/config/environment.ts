@@ -12,9 +12,13 @@ const schema = z.object({
   CORS_ORIGINS: z.string().default('http://localhost:5173'),
   SWAGGER_ENABLED: z.enum(['true', 'false']).default('true'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
-  RESEND_API_KEY: z.preprocess(
+  ZOHO_MAIL_API_TOKEN: z.preprocess(
     (value) => (value === '' ? undefined : value),
     z.string().min(1).optional(),
+  ),
+  ZOHO_MAIL_API_URL: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.string().url().optional(),
   ),
   EMAIL_FROM: z.preprocess(
     (value) => (value === '' ? undefined : value),
