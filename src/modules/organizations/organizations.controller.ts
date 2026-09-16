@@ -53,7 +53,7 @@ export class OrganizationsController {
     return this.organizations.updateSection(user, section, dto.data);
   }
 
-  @Get('users') users(@CurrentUser() user: AuthUser) {
+  @Roles(Role.OWNER, Role.ADMIN, Role.AUDITOR) @Get('users') users(@CurrentUser() user: AuthUser) {
     return this.organizations.users(user.organizationId);
   }
 

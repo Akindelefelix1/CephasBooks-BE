@@ -78,6 +78,7 @@ export class OrganizationsService {
     ];
     if (!allowed.includes(section))
       throw new BadRequestException('Unknown organisation settings section');
+    this.validateSection(section, data);
     return this.prisma.$transaction(async (tx) => {
       const organization = await tx.organization.findUniqueOrThrow({
         where: { id: actor.organizationId },
@@ -133,6 +134,8 @@ export class OrganizationsService {
 
   async inviteUser(actor: AuthUser, dto: InviteOrganizationUserDto) {
     const email = dto.email.trim().toLowerCase();
+    if (dto.role === 'OWNER')
+      throw new BadRequestException('Ownership cannot be assigned from user management');
     const existing = await this.prisma.user.findUnique({
       where: { email },
       include: { memberships: { where: { organizationId: actor.organizationId } } },
@@ -143,6 +146,8 @@ export class OrganizationsService {
       throw new BadRequestException(
         'No Cephas Books account exists for this email. Ask the user to register first.',
       );
+    if (!existing.verifiedAt || !existing.isActive)
+      throw new BadRequestException('The user account must be verified and active first');
     return this.prisma.$transaction(async (tx) => {
       const membership = await tx.membership.create({
         data: {
@@ -185,14 +190,34 @@ export class OrganizationsService {
       include: { user: true },
     });
     if (!membership) throw new NotFoundException('Organisation user not found');
+    if (membership.role === 'OWNER')
+      throw new BadRequestException('The organisation owner access cannot be changed');
+    if (dto.role === 'OWNER')
+      throw new BadRequestException('Ownership cannot be assigned from user management');
+    if (!dto.role && typeof dto.isActive !== 'boolean')
+      throw new BadRequestException('Provide a role or account status to update');
     if (membership.userId === actor.sub && dto.isActive === false)
       throw new BadRequestException('You cannot deactivate your own account');
+    if (dto.isActive === false) {
+      const membershipCount = await this.prisma.membership.count({
+        where: { userId: membership.userId },
+      });
+      if (membershipCount > 1)
+        throw new BadRequestException(
+          'This user belongs to more than one organisation and cannot be globally deactivated here',
+        );
+    }
     return this.prisma.$transaction(async (tx) => {
       if (dto.role) await tx.membership.update({ where: { id }, data: { role: dto.role } });
       if (typeof dto.isActive === 'boolean')
         await tx.user.update({
           where: { id: membership.userId },
           data: { isActive: dto.isActive },
+        });
+      if (dto.isActive === false)
+        await tx.session.updateMany({
+          where: { userId: membership.userId, revokedAt: null },
+          data: { revokedAt: new Date() },
         });
       await this.recordActivity(
         tx,
@@ -272,6 +297,63 @@ export class OrganizationsService {
         relatedId: entityId,
       },
     });
+  }
+
+  private validateSection(section: string, data: Record<string, unknown>) {
+    if (JSON.stringify(data).length > 100_000)
+      throw new BadRequestException('Organisation settings payload is too large');
+    const items = data.items;
+    if (section === 'branches' || section === 'currencies' || section === 'integrations') {
+      if (!Array.isArray(items)) throw new BadRequestException('Settings items must be an array');
+      if (items.length > 100) throw new BadRequestException('A maximum of 100 items is supported');
+    }
+    if (section === 'branches' && Array.isArray(items)) {
+      const branches = items.map((item) => item as Record<string, unknown>);
+      const names = branches.map((item) => (typeof item.name === 'string' ? item.name.trim() : ''));
+      if (names.some((name) => !name))
+        throw new BadRequestException('Every branch requires a name');
+      if (branches.some((item) => typeof item.address !== 'string' || !item.address.trim()))
+        throw new BadRequestException('Every branch requires an address');
+      if (new Set(names.map((name) => name.toLowerCase())).size !== names.length)
+        throw new ConflictException('Branch names must be unique');
+    }
+    if (section === 'currencies' && Array.isArray(items)) {
+      const currencies = items.map((item) => item as Record<string, unknown>);
+      const codes = currencies.map((item) =>
+        typeof item.code === 'string' ? item.code.toUpperCase() : '',
+      );
+      if (codes.some((code) => !/^[A-Z]{3}$/.test(code)))
+        throw new BadRequestException('Every currency requires a valid three-letter code');
+      if (new Set(codes).size !== codes.length)
+        throw new ConflictException('Currency codes must be unique');
+      if (
+        currencies.some((item) => {
+          const rate = Number(item.rate);
+          return (
+            typeof item.name !== 'string' ||
+            !item.name.trim() ||
+            !Number.isFinite(rate) ||
+            rate <= 0
+          );
+        })
+      )
+        throw new BadRequestException('Every currency requires a name and positive exchange rate');
+    }
+    if (section === 'security') {
+      if (Object.values(data).some((value) => typeof value !== 'boolean'))
+        throw new BadRequestException('Security control values must be true or false');
+    }
+    if (section === 'integrations' && Array.isArray(items)) {
+      if (
+        items.some((item) => {
+          const entry = item as Record<string, unknown>;
+          return (
+            typeof entry.id !== 'string' || !entry.id.trim() || typeof entry.connected !== 'boolean'
+          );
+        })
+      )
+        throw new BadRequestException('Every integration requires an id and connection state');
+    }
   }
 
   async getOnboarding(organizationId: string) {
