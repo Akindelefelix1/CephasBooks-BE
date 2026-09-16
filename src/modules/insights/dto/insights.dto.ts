@@ -1,5 +1,16 @@
 import { InsightReportType, SyncDirection, SyncStatus } from '@prisma/client';
-import { IsBoolean, IsDateString, IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsDateString,
+  IsEnum,
+  IsIn,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 export class SavedReportDto {
   @IsString() @IsNotEmpty() @MaxLength(100) name!: string;
@@ -8,16 +19,24 @@ export class SavedReportDto {
   @IsOptional() @IsDateString() dateFrom?: string;
   @IsOptional() @IsDateString() dateTo?: string;
 }
-export class ReportStatusDto { @IsBoolean() isArchived!: boolean; }
-export class AiQueryDto { @IsString() @IsNotEmpty() @MaxLength(500) question!: string; }
+export class ReportStatusDto {
+  @IsBoolean() isArchived!: boolean;
+}
+export class AiQueryDto {
+  @IsString() @IsNotEmpty() @MaxLength(500) question!: string;
+}
 export class WorkbookDto {
   @IsString() @IsNotEmpty() @MaxLength(100) name!: string;
-  @IsString() @IsNotEmpty() @MaxLength(50) dataSource!: string;
+  @IsString()
+  @IsIn(['invoices', 'expenses', 'products', 'projects', 'customers', 'suppliers'])
+  dataSource!: string;
   @IsOptional() @IsString() @MaxLength(255) fileName?: string;
   @IsEnum(SyncDirection) direction!: SyncDirection;
 }
-export class WorkbookStatusDto { @IsEnum(SyncStatus) status!: SyncStatus; }
+export class WorkbookStatusDto {
+  @IsEnum(SyncStatus) status!: SyncStatus;
+}
 export class RunSyncDto {
   @IsOptional() @IsInt() @Min(0) rowCount?: number;
-  @IsOptional() @IsString() fileName?: string;
+  @IsOptional() @IsString() @MaxLength(255) fileName?: string;
 }
