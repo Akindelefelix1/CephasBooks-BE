@@ -1,5 +1,12 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { ConflictException, NotFoundException } from '@nestjs/common';
+import type { AuthUser } from '../../common/decorators/current-user.decorator.ts';
+import type {
+  InviteOrganizationUserDto,
+  UpdateOrganizationDto,
+  UpdateOrganizationUserDto,
+} from './dto/update-organization.dto.ts';
 import { PrismaService } from '../../database/prisma.service.ts';
 
 const STEP_ORDER = ['business', 'financial', 'structure', 'tax', 'team'] as const;
@@ -15,6 +22,257 @@ const COUNTRY_CODES: Record<string, string> = {
 @Injectable()
 export class OrganizationsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async admin(organizationId: string) {
+    const organization = await this.prisma.organization.findUniqueOrThrow({
+      where: { id: organizationId },
+      select: {
+        id: true,
+        name: true,
+        baseCurrency: true,
+        countryCode: true,
+        onboardingData: true,
+        updatedAt: true,
+      },
+    });
+    const root = this.asObject(organization.onboardingData);
+    return {
+      organization: {
+        id: organization.id,
+        name: organization.name,
+        baseCurrency: organization.baseCurrency,
+        countryCode: organization.countryCode,
+        updatedAt: organization.updatedAt,
+      },
+      settings: this.asObject(root.admin as Prisma.JsonValue),
+    };
+  }
+
+  async updateOrganization(actor: AuthUser, dto: UpdateOrganizationDto) {
+    return this.prisma.$transaction(async (tx) => {
+      const organization = await tx.organization.update({
+        where: { id: actor.organizationId },
+        data: dto,
+      });
+      await this.recordActivity(
+        tx,
+        actor,
+        'ORGANIZATION_UPDATED',
+        'Organization',
+        organization.id,
+        'Organisation settings updated',
+        'Core organisation details were updated.',
+      );
+      return organization;
+    });
+  }
+
+  async updateSection(actor: AuthUser, section: string, data: Record<string, unknown>) {
+    const allowed = [
+      'profile',
+      'branches',
+      'currencies',
+      'security',
+      'integrations',
+      'preferences',
+    ];
+    if (!allowed.includes(section))
+      throw new BadRequestException('Unknown organisation settings section');
+    return this.prisma.$transaction(async (tx) => {
+      const organization = await tx.organization.findUniqueOrThrow({
+        where: { id: actor.organizationId },
+        select: { onboardingData: true },
+      });
+      const root = this.asObject(organization.onboardingData);
+      const admin = this.asObject(root.admin as Prisma.JsonValue);
+      const updated = await tx.organization.update({
+        where: { id: actor.organizationId },
+        data: {
+          onboardingData: {
+            ...root,
+            admin: { ...admin, [section]: data },
+          } as Prisma.InputJsonObject,
+        },
+        select: { updatedAt: true },
+      });
+      const label = section.charAt(0).toUpperCase() + section.slice(1);
+      await this.recordActivity(
+        tx,
+        actor,
+        `${section.toUpperCase()}_UPDATED`,
+        'OrganizationSettings',
+        actor.organizationId,
+        `${label} settings updated`,
+        `${label} configuration was changed by ${actor.email}.`,
+      );
+      return { section, data, updatedAt: updated.updatedAt };
+    });
+  }
+
+  users(organizationId: string) {
+    return this.prisma.membership.findMany({
+      where: { organizationId },
+      select: {
+        id: true,
+        role: true,
+        createdAt: true,
+        user: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+            isActive: true,
+            verifiedAt: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  async inviteUser(actor: AuthUser, dto: InviteOrganizationUserDto) {
+    const email = dto.email.trim().toLowerCase();
+    const existing = await this.prisma.user.findUnique({
+      where: { email },
+      include: { memberships: { where: { organizationId: actor.organizationId } } },
+    });
+    if (existing?.memberships.length)
+      throw new ConflictException('This user already belongs to the organisation');
+    if (!existing)
+      throw new BadRequestException(
+        'No Cephas Books account exists for this email. Ask the user to register first.',
+      );
+    return this.prisma.$transaction(async (tx) => {
+      const membership = await tx.membership.create({
+        data: {
+          userId: existing.id,
+          organizationId: actor.organizationId,
+          role: dto.role,
+        },
+        select: {
+          id: true,
+          role: true,
+          createdAt: true,
+          user: {
+            select: {
+              id: true,
+              email: true,
+              firstName: true,
+              lastName: true,
+              isActive: true,
+              verifiedAt: true,
+            },
+          },
+        },
+      });
+      await this.recordActivity(
+        tx,
+        actor,
+        'USER_INVITED',
+        'Membership',
+        membership.id,
+        'Team member invited',
+        `${email} was invited as ${dto.role.toLowerCase()}.`,
+      );
+      return membership;
+    });
+  }
+
+  async updateUser(actor: AuthUser, id: string, dto: UpdateOrganizationUserDto) {
+    const membership = await this.prisma.membership.findFirst({
+      where: { id, organizationId: actor.organizationId },
+      include: { user: true },
+    });
+    if (!membership) throw new NotFoundException('Organisation user not found');
+    if (membership.userId === actor.sub && dto.isActive === false)
+      throw new BadRequestException('You cannot deactivate your own account');
+    return this.prisma.$transaction(async (tx) => {
+      if (dto.role) await tx.membership.update({ where: { id }, data: { role: dto.role } });
+      if (typeof dto.isActive === 'boolean')
+        await tx.user.update({
+          where: { id: membership.userId },
+          data: { isActive: dto.isActive },
+        });
+      await this.recordActivity(
+        tx,
+        actor,
+        'USER_ACCESS_UPDATED',
+        'Membership',
+        id,
+        'User access updated',
+        `${membership.user.email} access or role was updated.`,
+      );
+      return tx.membership.findUniqueOrThrow({
+        where: { id },
+        select: {
+          id: true,
+          role: true,
+          createdAt: true,
+          user: {
+            select: {
+              id: true,
+              email: true,
+              firstName: true,
+              lastName: true,
+              isActive: true,
+              verifiedAt: true,
+            },
+          },
+        },
+      });
+    });
+  }
+
+  auditLogs(organizationId: string, search?: string) {
+    return this.prisma.auditLog.findMany({
+      where: {
+        organizationId,
+        ...(search
+          ? {
+              OR: [
+                { action: { contains: search, mode: 'insensitive' as const } },
+                { entityType: { contains: search, mode: 'insensitive' as const } },
+              ],
+            }
+          : {}),
+      },
+      include: { actor: { select: { email: true, firstName: true, lastName: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+  }
+
+  private async recordActivity(
+    tx: Prisma.TransactionClient,
+    actor: AuthUser,
+    action: string,
+    entityType: string,
+    entityId: string,
+    title: string,
+    message: string,
+  ) {
+    await tx.auditLog.create({
+      data: {
+        organizationId: actor.organizationId,
+        actorId: actor.sub,
+        action,
+        entityType,
+        entityId,
+        metadata: { email: actor.email },
+      },
+    });
+    await tx.appNotification.create({
+      data: {
+        organizationId: actor.organizationId,
+        title,
+        message,
+        category: 'SYSTEM',
+        relatedType: entityType,
+        relatedId: entityId,
+      },
+    });
+  }
 
   async getOnboarding(organizationId: string) {
     const organization = await this.prisma.organization.findUniqueOrThrow({

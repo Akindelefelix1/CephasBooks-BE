@@ -1,5 +1,6 @@
 ﻿import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Param, Post, Query } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Role } from '@prisma/client';
 import { CurrentUser, type AuthUser } from '../../common/decorators/current-user.decorator.ts';
@@ -13,7 +14,12 @@ import {
   TaxSetupDto,
   TeamSetupDto,
 } from './dto/onboarding.dto.ts';
-import { UpdateOrganizationDto } from './dto/update-organization.dto.ts';
+import {
+  InviteOrganizationUserDto,
+  UpdateOrganizationDto,
+  UpdateOrganizationSectionDto,
+  UpdateOrganizationUserDto,
+} from './dto/update-organization.dto.ts';
 import { OrganizationsService } from './organizations.service.ts';
 
 @ApiTags('Organizations')
@@ -32,7 +38,45 @@ export class OrganizationsController {
     @CurrentUser() user: AuthUser,
     @Body() dto: UpdateOrganizationDto,
   ) {
-    return this.prisma.organization.update({ where: { id: user.organizationId }, data: dto });
+    return this.organizations.updateOrganization(user, dto);
+  }
+
+  @Get('admin') admin(@CurrentUser() user: AuthUser) {
+    return this.organizations.admin(user.organizationId);
+  }
+
+  @Roles(Role.OWNER, Role.ADMIN) @Patch('admin/:section') updateSection(
+    @CurrentUser() user: AuthUser,
+    @Param('section') section: string,
+    @Body() dto: UpdateOrganizationSectionDto,
+  ) {
+    return this.organizations.updateSection(user, section, dto.data);
+  }
+
+  @Get('users') users(@CurrentUser() user: AuthUser) {
+    return this.organizations.users(user.organizationId);
+  }
+
+  @Roles(Role.OWNER, Role.ADMIN) @Post('users') inviteUser(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: InviteOrganizationUserDto,
+  ) {
+    return this.organizations.inviteUser(user, dto);
+  }
+
+  @Roles(Role.OWNER, Role.ADMIN) @Patch('users/:id') updateUser(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateOrganizationUserDto,
+  ) {
+    return this.organizations.updateUser(user, id, dto);
+  }
+
+  @Roles(Role.OWNER, Role.ADMIN, Role.AUDITOR) @Get('audit-logs') auditLogs(
+    @CurrentUser() user: AuthUser,
+    @Query('search') search?: string,
+  ) {
+    return this.organizations.auditLogs(user.organizationId, search);
   }
 
   @Get('onboarding')
