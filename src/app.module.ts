@@ -13,6 +13,7 @@ import { BankingModule } from './modules/banking/banking.module.ts';
 import { SalesModule } from './modules/sales/sales.module.ts';
 import { PurchasesModule } from './modules/purchases/purchases.module.ts';
 import { AccountingModule } from './modules/accounting/accounting.module.ts';
+import { OperationsModule } from './modules/operations/operations.module.ts';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { AccountingModule } from './modules/accounting/accounting.module.ts';
     SalesModule,
     PurchasesModule,
     AccountingModule,
+    OperationsModule,
   ],
 })
 export class AppModule {}

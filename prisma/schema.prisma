@@ -110,6 +110,33 @@ enum FinanceRecordKind {
   PAYROLL
 }
 
+enum ItemType {
+  PRODUCT
+  SERVICE
+}
+
+enum StockMovementType {
+  RECEIPT
+  ISSUE
+  TRANSFER_IN
+  TRANSFER_OUT
+  ADJUSTMENT
+}
+
+enum AdjustmentStatus {
+  DRAFT
+  APPROVED
+  VOID
+}
+
+enum ProjectStatus {
+  PLANNED
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+}
+
 model User {
   id                        String       @id @default(uuid()) @db.Uuid
   email                     String       @unique
@@ -157,6 +184,121 @@ model Organization {
   ledgerAccounts        LedgerAccount[]
   journals              Journal[]
   financeRecords        FinanceRecord[]
+  products              Product[]
+  warehouses            Warehouse[]
+  stockMovements        StockMovement[]
+  stockAdjustments      StockAdjustment[]
+  projects              Project[]
+}
+
+model Product {
+  id             String            @id @default(uuid()) @db.Uuid
+  organizationId String            @db.Uuid
+  sku            String
+  name           String
+  type           ItemType          @default(PRODUCT)
+  category       String?
+  description    String?
+  unit           String            @default("unit")
+  salePrice      Decimal           @default(0) @db.Decimal(19, 4)
+  costPrice      Decimal           @default(0) @db.Decimal(19, 4)
+  taxRate        Decimal           @default(0) @db.Decimal(7, 4)
+  reorderLevel   Decimal           @default(0) @db.Decimal(19, 4)
+  isActive       Boolean           @default(true)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  movements      StockMovement[]
+  adjustments    StockAdjustment[]
+
+  @@unique([organizationId, sku])
+  @@index([organizationId, type, isActive])
+}
+
+model Warehouse {
+  id             String            @id @default(uuid()) @db.Uuid
+  organizationId String            @db.Uuid
+  code           String
+  name           String
+  address        String?
+  manager        String?
+  isActive       Boolean           @default(true)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  movements      StockMovement[]
+  adjustments    StockAdjustment[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId, isActive])
+}
+
+model StockMovement {
+  id              String            @id @default(uuid()) @db.Uuid
+  organizationId  String            @db.Uuid
+  productId       String            @db.Uuid
+  warehouseId     String            @db.Uuid
+  type            StockMovementType
+  quantity        Decimal           @db.Decimal(19, 4)
+  unitCost        Decimal           @default(0) @db.Decimal(19, 4)
+  movementDate    DateTime          @db.Date
+  reference       String
+  transferGroupId String?           @db.Uuid
+  notes           String?
+  createdAt       DateTime          @default(now())
+  organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  product         Product           @relation(fields: [productId], references: [id], onDelete: Restrict)
+  warehouse       Warehouse         @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, reference])
+  @@index([organizationId, movementDate])
+  @@index([productId, warehouseId])
+  @@index([transferGroupId])
+}
+
+model StockAdjustment {
+  id             String           @id @default(uuid()) @db.Uuid
+  organizationId String           @db.Uuid
+  productId      String           @db.Uuid
+  warehouseId    String           @db.Uuid
+  reference      String
+  adjustmentDate DateTime         @db.Date
+  quantityDelta  Decimal          @db.Decimal(19, 4)
+  unitCost       Decimal          @default(0) @db.Decimal(19, 4)
+  reason         String
+  status         AdjustmentStatus @default(DRAFT)
+  notes          String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  product        Product          @relation(fields: [productId], references: [id], onDelete: Restrict)
+  warehouse      Warehouse        @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, reference])
+  @@index([organizationId, status, adjustmentDate])
+}
+
+model Project {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @db.Uuid
+  code           String
+  name           String
+  client         String?
+  owner          String
+  startDate      DateTime      @db.Date
+  endDate        DateTime?     @db.Date
+  budget         Decimal       @default(0) @db.Decimal(19, 4)
+  actualCost     Decimal       @default(0) @db.Decimal(19, 4)
+  revenue        Decimal       @default(0) @db.Decimal(19, 4)
+  status         ProjectStatus @default(PLANNED)
+  description    String?
+  tasks          Json          @default("[]")
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, code])
+  @@index([organizationId, status])
 }
 
 model Membership {
