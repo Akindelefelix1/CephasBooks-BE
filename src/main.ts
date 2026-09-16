@@ -10,9 +10,13 @@ import { AppModule } from './app.module.ts';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.ts';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter(), {
-    bufferLogs: true,
-  });
+  const app = await NestFactory.create<NestFastifyApplication>(
+    AppModule,
+    new FastifyAdapter({ bodyLimit: 8 * 1024 * 1024 }),
+    {
+      bufferLogs: true,
+    },
+  );
   const config = app.get(ConfigService);
   app.useLogger(app.get(Logger));
   await app.register(helmet);

@@ -2,10 +2,14 @@
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.ts';
 import { CreateInvoiceDto } from './dto/create-invoice.dto.ts';
+import { WorkflowService } from '../workflow/workflow.service.ts';
 
 @Injectable()
 export class InvoicesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly workflows?: WorkflowService,
+  ) {}
   list(organizationId: string) {
     return this.prisma.invoice.findMany({
       where: { organizationId },
@@ -38,7 +42,7 @@ export class InvoicesService {
       new Prisma.Decimal(0),
     );
     const total = items.reduce((sum, item) => sum.add(item.lineTotal), new Prisma.Decimal(0));
-    return this.prisma.invoice.create({
+    const invoice = await this.prisma.invoice.create({
       data: {
         organizationId,
         customerId: dto.customerId,
@@ -55,5 +59,13 @@ export class InvoicesService {
       },
       include: { customer: true, items: true },
     });
+    await this.workflows?.executeEvent(organizationId, 'INVOICE_CREATED', {
+      entityType: 'INVOICE',
+      entityId: invoice.id,
+      reference: invoice.number,
+      title: `Approve invoice ${invoice.number}`,
+      amount: Number(invoice.total),
+    });
+    return invoice;
   }
 }

@@ -7,6 +7,7 @@ import {
   PurchaseRequestStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.ts';
+import { WorkflowService } from '../workflow/workflow.service.ts';
 import {
   BillDto,
   ExpenseDto,
@@ -18,7 +19,10 @@ import {
 } from './dto/purchases.dto.ts';
 @Injectable()
 export class PurchasesService {
-  constructor(private readonly db: PrismaService) {}
+  constructor(
+    private readonly db: PrismaService,
+    private readonly workflows?: WorkflowService,
+  ) {}
   private totals(items: PurchaseLineDto[]) {
     const subtotal = items.reduce(
       (s, x) => s.add(new Prisma.Decimal(x.quantity).mul(x.unitPrice)),
@@ -189,7 +193,7 @@ export class PurchasesService {
       if (!r) throw new BadRequestException('Only an approved request can become an order');
     }
     const t = this.totals(d.items);
-    return this.db.$transaction(async (tx) => {
+    const bill = await this.db.$transaction(async (tx) => {
       const o = await tx.purchaseOrder.create({
         data: {
           ...d,
@@ -208,6 +212,14 @@ export class PurchasesService {
         });
       return o;
     });
+    await this.workflows?.executeEvent(org, 'BILL_CREATED', {
+      entityType: 'BILL',
+      entityId: bill.id,
+      reference: bill.number,
+      title: `Approve bill ${bill.number}`,
+      amount: Number(bill.total),
+    });
+    return bill;
   }
   async orderStatus(org: string, id: string, status: PurchaseOrderStatus) {
     const x = await this.db.purchaseOrder.findFirst({ where: { id, organizationId: org } });
@@ -433,7 +445,7 @@ export class PurchasesService {
   }
   async createExpense(org: string, d: ExpenseDto) {
     if (d.supplierId) await this.supplier(org, d.supplierId);
-    return this.db.expense.create({
+    const expense = await this.db.expense.create({
       data: {
         ...d,
         organizationId: org,
@@ -442,6 +454,14 @@ export class PurchasesService {
         taxAmount: new Prisma.Decimal(d.taxAmount),
       },
     });
+    await this.workflows?.executeEvent(org, 'EXPENSE_CREATED', {
+      entityType: 'EXPENSE',
+      entityId: expense.id,
+      reference: expense.reference,
+      title: `Approve expense ${expense.reference}`,
+      amount: Number(expense.amount),
+    });
+    return expense;
   }
   async expenseStatus(org: string, id: string, status: ExpenseStatus) {
     return this.db.$transaction(async (tx) => {

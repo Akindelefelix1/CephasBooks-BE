@@ -159,6 +159,30 @@ enum SyncStatus {
   ERROR
 }
 
+enum DocumentStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum NotificationCategory {
+  FINANCIAL
+  APPROVALS
+  OPERATIONS
+  SYSTEM
+}
+
+enum WorkflowStatus {
+  ACTIVE
+  PAUSED
+}
+
 model User {
   id                        String       @id @default(uuid()) @db.Uuid
   email                     String       @unique
@@ -214,6 +238,81 @@ model Organization {
   savedReports          SavedReport[]
   aiInsights            AiInsight[]
   workbookConnections   WorkbookConnection[]
+  documents             DocumentRecord[]
+  approvals             ApprovalRequest[]
+  notifications         AppNotification[]
+  workflowRules         WorkflowRule[]
+}
+
+model DocumentRecord {
+  id             String         @id @default(uuid()) @db.Uuid
+  organizationId String         @db.Uuid
+  name           String
+  category       String
+  mimeType       String
+  size           Int
+  content        Bytes
+  linkedType     String?
+  linkedReference String?
+  notes          String?
+  status         DocumentStatus @default(ACTIVE)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  @@index([organizationId, status, createdAt])
+}
+
+model ApprovalRequest {
+  id             String         @id @default(uuid()) @db.Uuid
+  organizationId String         @db.Uuid
+  title          String
+  entityType     String
+  entityId       String?
+  reference      String
+  amount         Decimal?       @db.Decimal(19, 4)
+  requestedBy    String
+  assignedRole   Role           @default(APPROVER)
+  status         ApprovalStatus @default(PENDING)
+  notes          String?
+  decisionNote   String?
+  decidedAt      DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  @@unique([organizationId, entityType, reference])
+  @@index([organizationId, status, createdAt])
+}
+
+model AppNotification {
+  id             String               @id @default(uuid()) @db.Uuid
+  organizationId String               @db.Uuid
+  title          String
+  message        String
+  category       NotificationCategory @default(SYSTEM)
+  relatedType    String?
+  relatedId      String?
+  isRead         Boolean              @default(false)
+  createdAt      DateTime             @default(now())
+  organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  @@index([organizationId, isRead, createdAt])
+}
+
+model WorkflowRule {
+  id             String         @id @default(uuid()) @db.Uuid
+  organizationId String         @db.Uuid
+  name           String
+  event          String
+  condition      String
+  action         String
+  status         WorkflowStatus @default(ACTIVE)
+  runCount       Int            @default(0)
+  failureCount   Int            @default(0)
+  lastRunAt      DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  @@unique([organizationId, name])
+  @@index([organizationId, status])
 }
 
 model SavedReport {

@@ -21,7 +21,8 @@ export class InvoicesController {
     return this.invoices.get(user.organizationId, id);
   }
   @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT)
-  @Post() create(@CurrentUser() user: AuthUser, @Body() dto: CreateInvoiceDto) {
+  @Post()
+  create(@CurrentUser() user: AuthUser, @Body() dto: CreateInvoiceDto) {
     return this.invoices.create(user.organizationId, dto);
   }
 }

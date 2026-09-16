@@ -1,0 +1,18 @@
+CREATE TYPE "DocumentStatus" AS ENUM ('ACTIVE', 'ARCHIVED');
+CREATE TYPE "ApprovalStatus" AS ENUM ('PENDING', 'APPROVED', 'REJECTED', 'CANCELLED');
+CREATE TYPE "NotificationCategory" AS ENUM ('FINANCIAL', 'APPROVALS', 'OPERATIONS', 'SYSTEM');
+CREATE TYPE "WorkflowStatus" AS ENUM ('ACTIVE', 'PAUSED');
+CREATE TABLE "DocumentRecord" ("id" UUID NOT NULL, "organizationId" UUID NOT NULL, "name" TEXT NOT NULL, "category" TEXT NOT NULL, "mimeType" TEXT NOT NULL, "size" INTEGER NOT NULL, "content" BYTEA NOT NULL, "linkedType" TEXT, "linkedReference" TEXT, "notes" TEXT, "status" "DocumentStatus" NOT NULL DEFAULT 'ACTIVE', "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" TIMESTAMP(3) NOT NULL, CONSTRAINT "DocumentRecord_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "ApprovalRequest" ("id" UUID NOT NULL, "organizationId" UUID NOT NULL, "title" TEXT NOT NULL, "entityType" TEXT NOT NULL, "entityId" TEXT, "reference" TEXT NOT NULL, "amount" DECIMAL(19,4), "requestedBy" TEXT NOT NULL, "assignedRole" "Role" NOT NULL DEFAULT 'APPROVER', "status" "ApprovalStatus" NOT NULL DEFAULT 'PENDING', "notes" TEXT, "decisionNote" TEXT, "decidedAt" TIMESTAMP(3), "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" TIMESTAMP(3) NOT NULL, CONSTRAINT "ApprovalRequest_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "AppNotification" ("id" UUID NOT NULL, "organizationId" UUID NOT NULL, "title" TEXT NOT NULL, "message" TEXT NOT NULL, "category" "NotificationCategory" NOT NULL DEFAULT 'SYSTEM', "relatedType" TEXT, "relatedId" TEXT, "isRead" BOOLEAN NOT NULL DEFAULT false, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "AppNotification_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "WorkflowRule" ("id" UUID NOT NULL, "organizationId" UUID NOT NULL, "name" TEXT NOT NULL, "event" TEXT NOT NULL, "condition" TEXT NOT NULL, "action" TEXT NOT NULL, "status" "WorkflowStatus" NOT NULL DEFAULT 'ACTIVE', "runCount" INTEGER NOT NULL DEFAULT 0, "failureCount" INTEGER NOT NULL DEFAULT 0, "lastRunAt" TIMESTAMP(3), "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" TIMESTAMP(3) NOT NULL, CONSTRAINT "WorkflowRule_pkey" PRIMARY KEY ("id"));
+CREATE INDEX "DocumentRecord_organizationId_status_createdAt_idx" ON "DocumentRecord"("organizationId", "status", "createdAt");
+CREATE UNIQUE INDEX "ApprovalRequest_organizationId_entityType_reference_key" ON "ApprovalRequest"("organizationId", "entityType", "reference");
+CREATE INDEX "ApprovalRequest_organizationId_status_createdAt_idx" ON "ApprovalRequest"("organizationId", "status", "createdAt");
+CREATE INDEX "AppNotification_organizationId_isRead_createdAt_idx" ON "AppNotification"("organizationId", "isRead", "createdAt");
+CREATE UNIQUE INDEX "WorkflowRule_organizationId_name_key" ON "WorkflowRule"("organizationId", "name");
+CREATE INDEX "WorkflowRule_organizationId_status_idx" ON "WorkflowRule"("organizationId", "status");
+ALTER TABLE "DocumentRecord" ADD CONSTRAINT "DocumentRecord_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "ApprovalRequest" ADD CONSTRAINT "ApprovalRequest_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "AppNotification" ADD CONSTRAINT "AppNotification_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "WorkflowRule" ADD CONSTRAINT "WorkflowRule_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
