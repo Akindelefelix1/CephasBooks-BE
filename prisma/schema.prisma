@@ -199,6 +199,7 @@ model User {
   memberships               Membership[]
   sessions                  Session[]
   auditLogs                 AuditLog[]
+  notificationReceipts      NotificationReceipt[]
 }
 
 model Organization {
@@ -294,7 +295,19 @@ model AppNotification {
   isRead         Boolean              @default(false)
   createdAt      DateTime             @default(now())
   organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  receipts       NotificationReceipt[]
   @@index([organizationId, isRead, createdAt])
+}
+
+model NotificationReceipt {
+  id             String          @id @default(uuid()) @db.Uuid
+  notificationId String          @db.Uuid
+  userId         String          @db.Uuid
+  readAt         DateTime        @default(now())
+  notification   AppNotification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([notificationId, userId])
+  @@index([userId, readAt])
 }
 
 model WorkflowRule {

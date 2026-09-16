@@ -32,7 +32,7 @@ import { WorkflowService } from './workflow.service.ts';
 export class WorkflowController {
   constructor(private readonly service: WorkflowService) {}
   @Get('summary') summary(@CurrentUser() u: AuthUser) {
-    return this.service.summary(u.organizationId);
+    return this.service.summary(u.organizationId, u.sub);
   }
   @Get('documents') documents(@CurrentUser() u: AuthUser, @Query() q: Record<string, string>) {
     return this.service.documents(u.organizationId, q);
@@ -78,13 +78,13 @@ export class WorkflowController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() d: ApprovalDecisionDto,
   ) {
-    return this.service.decide(u.organizationId, id, d);
+    return this.service.decide(u.organizationId, id, u.role, d);
   }
   @Get('notifications') notifications(
     @CurrentUser() u: AuthUser,
     @Query() q: Record<string, string>,
   ) {
-    return this.service.notifications(u.organizationId, q);
+    return this.service.notifications(u.organizationId, u.sub, q);
   }
   @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT) @Post('notifications') createNotification(
     @CurrentUser() u: AuthUser,
@@ -93,14 +93,14 @@ export class WorkflowController {
     return this.service.createNotification(u.organizationId, d);
   }
   @Patch('notifications/read-all') readAll(@CurrentUser() u: AuthUser) {
-    return this.service.readAll(u.organizationId);
+    return this.service.readAll(u.organizationId, u.sub);
   }
   @Patch('notifications/:id/read') read(
     @CurrentUser() u: AuthUser,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() d: ReadDto,
   ) {
-    return this.service.read(u.organizationId, id, d.isRead ?? true);
+    return this.service.read(u.organizationId, u.sub, id, d.isRead ?? true);
   }
   @Get('rules') rules(@CurrentUser() u: AuthUser, @Query() q: Record<string, string>) {
     return this.service.rules(u.organizationId, q);

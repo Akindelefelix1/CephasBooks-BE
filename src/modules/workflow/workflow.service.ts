@@ -12,12 +12,14 @@ import type {
 @Injectable()
 export class WorkflowService {
   constructor(private readonly db: PrismaService) {}
-  async summary(org: string) {
+  async summary(org: string, userId: string) {
     const [documents, pendingApprovals, unreadNotifications, activeRules, runs, failures] =
       await Promise.all([
         this.db.documentRecord.count({ where: { organizationId: org, status: 'ACTIVE' } }),
         this.db.approvalRequest.count({ where: { organizationId: org, status: 'PENDING' } }),
-        this.db.appNotification.count({ where: { organizationId: org, isRead: false } }),
+        this.db.appNotification.count({
+          where: { organizationId: org, receipts: { none: { userId } } },
+        }),
         this.db.workflowRule.count({ where: { organizationId: org, status: 'ACTIVE' } }),
         this.db.workflowRule.aggregate({
           where: { organizationId: org },
@@ -166,10 +168,14 @@ export class WorkflowService {
     });
     return approval;
   }
-  async decide(org: string, id: string, d: ApprovalDecisionDto) {
+  async decide(org: string, id: string, actorRole: string, d: ApprovalDecisionDto) {
     const approval = await this.approval(org, id);
     if (approval.status !== 'PENDING')
       throw new BadRequestException('Only pending requests can be decided');
+    if (!['OWNER', 'ADMIN'].includes(actorRole) && approval.assignedRole !== actorRole)
+      throw new BadRequestException(
+        `This request is assigned to the ${approval.assignedRole.toLowerCase()} role`,
+      );
     const updated = await this.db.approvalRequest.update({
       where: { id },
       data: {
@@ -190,33 +196,47 @@ export class WorkflowService {
     });
     return updated;
   }
-  notifications(org: string, q: Record<string, string>) {
-    return this.db.appNotification.findMany({
+  async notifications(org: string, userId: string, q: Record<string, string>) {
+    const items = await this.db.appNotification.findMany({
       where: {
         organizationId: org,
         ...(q.category ? { category: q.category as never } : {}),
-        ...(q.unread === 'true' ? { isRead: false } : {}),
+        ...(q.unread === 'true' ? { receipts: { none: { userId } } } : {}),
       },
+      include: { receipts: { where: { userId }, select: { id: true } } },
       orderBy: { createdAt: 'desc' },
       take: 100,
     });
+    return items.map(({ receipts, ...item }) => ({ ...item, isRead: receipts.length > 0 }));
   }
   createNotification(org: string, d: NotificationDto) {
     return this.db.appNotification.create({
       data: { ...d, title: d.title.trim(), message: d.message.trim(), organizationId: org },
     });
   }
-  async read(org: string, id: string, isRead: boolean) {
+  async read(org: string, userId: string, id: string, isRead: boolean) {
     const item = await this.db.appNotification.findFirst({ where: { id, organizationId: org } });
     if (!item) throw new NotFoundException('Notification not found');
-    return this.db.appNotification.update({ where: { id }, data: { isRead } });
+    if (isRead)
+      await this.db.notificationReceipt.upsert({
+        where: { notificationId_userId: { notificationId: id, userId } },
+        create: { notificationId: id, userId },
+        update: { readAt: new Date() },
+      });
+    else await this.db.notificationReceipt.deleteMany({ where: { notificationId: id, userId } });
+    return { ...item, isRead };
   }
-  async readAll(org: string) {
-    const result = await this.db.appNotification.updateMany({
-      where: { organizationId: org, isRead: false },
-      data: { isRead: true },
+  async readAll(org: string, userId: string) {
+    const unread = await this.db.appNotification.findMany({
+      where: { organizationId: org, receipts: { none: { userId } } },
+      select: { id: true },
     });
-    return { updated: result.count };
+    if (unread.length)
+      await this.db.notificationReceipt.createMany({
+        data: unread.map(({ id }) => ({ notificationId: id, userId })),
+        skipDuplicates: true,
+      });
+    return { updated: unread.length };
   }
   rules(org: string, q: Record<string, string>) {
     return this.db.workflowRule.findMany({
@@ -229,6 +249,13 @@ export class WorkflowService {
     });
   }
   createRule(org: string, d: WorkflowDto) {
+    if (
+      !/^always$/i.test(d.condition.trim()) &&
+      !/^amount\s*(?:exceeds|>|above)\s*[\d,.]+$/i.test(d.condition.trim())
+    )
+      throw new BadRequestException(
+        'Condition must be "Always" or use the format "amount exceeds 500000"',
+      );
     return this.db.workflowRule.create({
       data: { ...d, name: d.name.trim(), condition: d.condition.trim(), organizationId: org },
     });
@@ -241,6 +268,14 @@ export class WorkflowService {
     const rule = await this.rule(org, id);
     if (rule.status === 'PAUSED')
       throw new BadRequestException('Resume this workflow before running it');
+    if (rule.action === 'CREATE_APPROVAL')
+      await this.createApproval(org, 'Workflow automation', {
+        title: `${rule.name} manual review`,
+        entityType: 'MANUAL',
+        reference: `WF-${rule.id.slice(0, 8)}-${Date.now()}`,
+        assignedRole: 'APPROVER',
+        notes: rule.condition,
+      });
     const result = await this.db.workflowRule.update({
       where: { id },
       data: { runCount: { increment: 1 }, lastRunAt: new Date() },
@@ -248,7 +283,8 @@ export class WorkflowService {
     await this.db.appNotification.create({
       data: {
         organizationId: org,
-        title: 'Workflow completed',
+        title:
+          rule.action === 'FLAG_FOR_REVIEW' ? 'Workflow flagged for review' : 'Workflow completed',
         message: `${rule.name} ran successfully: ${rule.action.replaceAll('_', ' ').toLowerCase()}.`,
         category: 'SYSTEM',
         relatedType: 'WORKFLOW',

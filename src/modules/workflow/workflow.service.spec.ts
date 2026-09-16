@@ -33,9 +33,41 @@ describe('WorkflowService', () => {
       },
     } as never);
     await expect(
-      service.decide('org-a', 'approval', { status: 'REJECTED' } as never),
+      service.decide('org-a', 'approval', 'APPROVER', { status: 'REJECTED' } as never),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(update).not.toHaveBeenCalled();
+  });
+
+  it('enforces the assigned approval role', async () => {
+    const update = jest.fn();
+    const service = new WorkflowService({
+      approvalRequest: {
+        findFirst: jest
+          .fn()
+          .mockResolvedValue({ id: 'approval', status: 'PENDING', assignedRole: 'OWNER' }),
+        update,
+      },
+    } as never);
+    await expect(
+      service.decide('org-a', 'approval', 'APPROVER', { status: 'APPROVED' } as never),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('stores notification read state for the current user only', async () => {
+    const upsert = jest.fn().mockResolvedValue({});
+    const service = new WorkflowService({
+      appNotification: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'notice', organizationId: 'org-a' }),
+      },
+      notificationReceipt: { upsert },
+    } as never);
+    await service.read('org-a', 'user-a', 'notice', true);
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { notificationId_userId: { notificationId: 'notice', userId: 'user-a' } },
+      }),
+    );
   });
 
   it('runs amount workflows only when their threshold matches', async () => {
