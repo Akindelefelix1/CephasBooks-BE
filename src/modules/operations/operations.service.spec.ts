@@ -44,16 +44,14 @@ describe('OperationsService', () => {
       product: { findFirst: jest.fn().mockResolvedValue({ id: 'product', type: 'PRODUCT' }) },
       warehouse: { findFirst: jest.fn().mockResolvedValue({ id: 'warehouse' }) },
       stockMovement: {
-        findMany: jest
-          .fn()
-          .mockResolvedValue([
-            {
-              productId: 'product',
-              type: 'RECEIPT',
-              quantity: new Prisma.Decimal(4),
-              unitCost: new Prisma.Decimal(2),
-            },
-          ]),
+        findMany: jest.fn().mockResolvedValue([
+          {
+            productId: 'product',
+            type: 'RECEIPT',
+            quantity: new Prisma.Decimal(4),
+            unitCost: new Prisma.Decimal(2),
+          },
+        ]),
       },
     } as never);
     await expect(
@@ -67,6 +65,38 @@ describe('OperationsService', () => {
         reference: 'MOV-2',
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('prevents archiving an item while stock remains on hand', async () => {
+    const update = jest.fn();
+    const service = new OperationsService({
+      product: { findFirst: jest.fn().mockResolvedValue({ id: 'product' }), update },
+      stockMovement: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            productId: 'product',
+            type: 'RECEIPT',
+            quantity: new Prisma.Decimal(3),
+            unitCost: new Prisma.Decimal(2),
+          },
+        ]),
+      },
+    } as never);
+    await expect(service.productStatus('org-a', 'product', false)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('only permits approval or void as draft adjustment transitions', async () => {
+    const service = new OperationsService({
+      stockAdjustment: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'adjustment', status: 'DRAFT' }),
+      },
+    } as never);
+    await expect(service.adjustmentStatus('org-a', 'adjustment', 'DRAFT')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
   });
 
   it('does not update a project from another organization', async () => {

@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsNumber,
@@ -33,7 +34,7 @@ export class WarehouseDto {
 }
 
 export class ActiveStatusDto {
-  @Type(() => Boolean) isActive!: boolean;
+  @IsBoolean() isActive!: boolean;
 }
 
 export class MovementDto {

@@ -17,7 +17,11 @@ export class OperationsService {
   constructor(private readonly db: PrismaService) {}
 
   async summary(org: string) {
-    const [products, warehouses, activeProjects, movements] = await Promise.all([
+    const [organization, products, warehouses, activeProjects, movements] = await Promise.all([
+      this.db.organization.findUniqueOrThrow({
+        where: { id: org },
+        select: { baseCurrency: true },
+      }),
       this.db.product.findMany({ where: { organizationId: org, isActive: true } }),
       this.db.warehouse.count({ where: { organizationId: org, isActive: true } }),
       this.db.project.count({ where: { organizationId: org, status: 'ACTIVE' } }),
@@ -37,6 +41,7 @@ export class OperationsService {
       else if (quantity.lte(product.reorderLevel)) lowStock += 1;
     }
     return {
+      baseCurrency: organization.baseCurrency,
       inventoryValue,
       products: products.length,
       warehouses,
@@ -91,6 +96,15 @@ export class OperationsService {
   }
   async productStatus(org: string, id: string, isActive: boolean) {
     await this.product(org, id);
+    if (!isActive) {
+      const movements = await this.db.stockMovement.findMany({
+        where: { organizationId: org, productId: id },
+        select: { productId: true, type: true, quantity: true, unitCost: true },
+      });
+      const available = this.stockMap(movements).get(id) ?? new Prisma.Decimal(0);
+      if (!available.isZero())
+        throw new BadRequestException('An item with stock on hand cannot be archived');
+    }
     return this.db.product.update({ where: { id }, data: { isActive } });
   }
 
@@ -124,6 +138,17 @@ export class OperationsService {
   }
   async warehouseStatus(org: string, id: string, isActive: boolean) {
     await this.warehouse(org, id);
+    if (!isActive) {
+      const movements = await this.db.stockMovement.findMany({
+        where: { organizationId: org, warehouseId: id },
+        select: { productId: true, type: true, quantity: true, unitCost: true },
+      });
+      const hasStock = [...this.stockMap(movements).values()].some(
+        (quantity) => !quantity.isZero(),
+      );
+      if (hasStock)
+        throw new BadRequestException('A warehouse with stock on hand cannot be archived');
+    }
     return this.db.warehouse.update({ where: { id }, data: { isActive } });
   }
 
@@ -148,8 +173,8 @@ export class OperationsService {
   }
   async createMovement(org: string, d: MovementDto) {
     const [product] = await Promise.all([
-      this.product(org, d.productId),
-      this.warehouse(org, d.warehouseId),
+      this.product(org, d.productId, true),
+      this.warehouse(org, d.warehouseId, true),
     ]);
     if (product.type === 'SERVICE')
       throw new BadRequestException('Services cannot have stock movements');
@@ -161,9 +186,9 @@ export class OperationsService {
     if (d.fromWarehouseId === d.toWarehouseId)
       throw new BadRequestException('Transfer warehouses must be different');
     await Promise.all([
-      this.product(org, d.productId),
-      this.warehouse(org, d.fromWarehouseId),
-      this.warehouse(org, d.toWarehouseId),
+      this.product(org, d.productId, true),
+      this.warehouse(org, d.fromWarehouseId, true),
+      this.warehouse(org, d.toWarehouseId, true),
     ]);
     await this.requireStock(org, d.productId, d.fromWarehouseId, d.quantity);
     const transferGroupId = randomUUID();
@@ -218,7 +243,12 @@ export class OperationsService {
     });
   }
   async createAdjustment(org: string, d: AdjustmentDto) {
-    await Promise.all([this.product(org, d.productId), this.warehouse(org, d.warehouseId)]);
+    const [product] = await Promise.all([
+      this.product(org, d.productId, true),
+      this.warehouse(org, d.warehouseId, true),
+    ]);
+    if (product.type === 'SERVICE')
+      throw new BadRequestException('Services cannot have stock adjustments');
     if (d.quantityDelta === 0) throw new BadRequestException('Adjustment quantity cannot be zero');
     return this.db.stockAdjustment.create({ data: { ...d, organizationId: org } });
   }
@@ -229,6 +259,8 @@ export class OperationsService {
     if (!adjustment) throw new NotFoundException('Adjustment not found');
     if (adjustment.status !== 'DRAFT')
       throw new BadRequestException('Only draft adjustments can be changed');
+    if (!['APPROVED', 'VOID'].includes(status))
+      throw new BadRequestException('A draft adjustment can only be approved or voided');
     if (status === 'APPROVED' && adjustment.quantityDelta.lt(0))
       await this.requireStock(
         org,
@@ -317,13 +349,17 @@ export class OperationsService {
     };
   }
 
-  private async product(org: string, id: string) {
-    const x = await this.db.product.findFirst({ where: { id, organizationId: org } });
+  private async product(org: string, id: string, active = false) {
+    const x = await this.db.product.findFirst({
+      where: { id, organizationId: org, ...(active ? { isActive: true } : {}) },
+    });
     if (!x) throw new NotFoundException('Product not found');
     return x;
   }
-  private async warehouse(org: string, id: string) {
-    const x = await this.db.warehouse.findFirst({ where: { id, organizationId: org } });
+  private async warehouse(org: string, id: string, active = false) {
+    const x = await this.db.warehouse.findFirst({
+      where: { id, organizationId: org, ...(active ? { isActive: true } : {}) },
+    });
     if (!x) throw new NotFoundException('Warehouse not found');
     return x;
   }
