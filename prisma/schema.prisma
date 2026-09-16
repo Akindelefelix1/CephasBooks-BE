@@ -137,6 +137,28 @@ enum ProjectStatus {
   CANCELLED
 }
 
+enum InsightReportType {
+  EXECUTIVE
+  PROFIT_LOSS
+  CASH_FLOW
+  RECEIVABLES
+  PAYABLES
+  INVENTORY
+  PROJECTS
+}
+
+enum SyncDirection {
+  IMPORT
+  EXPORT
+  TWO_WAY
+}
+
+enum SyncStatus {
+  ACTIVE
+  PAUSED
+  ERROR
+}
+
 model User {
   id                        String       @id @default(uuid()) @db.Uuid
   email                     String       @unique
@@ -189,6 +211,56 @@ model Organization {
   stockMovements        StockMovement[]
   stockAdjustments      StockAdjustment[]
   projects              Project[]
+  savedReports          SavedReport[]
+  aiInsights            AiInsight[]
+  workbookConnections   WorkbookConnection[]
+}
+
+model SavedReport {
+  id             String            @id @default(uuid()) @db.Uuid
+  organizationId String            @db.Uuid
+  name           String
+  description    String?
+  type           InsightReportType @default(EXECUTIVE)
+  dateFrom       DateTime?         @db.Date
+  dateTo         DateTime?         @db.Date
+  isArchived     Boolean           @default(false)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, name])
+  @@index([organizationId, isArchived])
+}
+
+model AiInsight {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  question       String
+  answer         String
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+}
+
+model WorkbookConnection {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @db.Uuid
+  name           String
+  dataSource     String
+  fileName       String?
+  direction      SyncDirection @default(EXPORT)
+  status         SyncStatus    @default(ACTIVE)
+  rowsSynced     Int           @default(0)
+  lastSyncedAt   DateTime?
+  errorMessage   String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, name])
+  @@index([organizationId, status])
 }
 
 model Product {

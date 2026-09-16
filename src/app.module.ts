@@ -14,6 +14,7 @@ import { SalesModule } from './modules/sales/sales.module.ts';
 import { PurchasesModule } from './modules/purchases/purchases.module.ts';
 import { AccountingModule } from './modules/accounting/accounting.module.ts';
 import { OperationsModule } from './modules/operations/operations.module.ts';
+import { InsightsModule } from './modules/insights/insights.module.ts';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { OperationsModule } from './modules/operations/operations.module.ts';
     PurchasesModule,
     AccountingModule,
     OperationsModule,
+    InsightsModule,
   ],
 })
 export class AppModule {}

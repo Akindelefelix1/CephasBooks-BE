@@ -1,0 +1,14 @@
+CREATE TYPE "InsightReportType" AS ENUM ('EXECUTIVE', 'PROFIT_LOSS', 'CASH_FLOW', 'RECEIVABLES', 'PAYABLES', 'INVENTORY', 'PROJECTS');
+CREATE TYPE "SyncDirection" AS ENUM ('IMPORT', 'EXPORT', 'TWO_WAY');
+CREATE TYPE "SyncStatus" AS ENUM ('ACTIVE', 'PAUSED', 'ERROR');
+CREATE TABLE "SavedReport" ("id" UUID NOT NULL, "organizationId" UUID NOT NULL, "name" TEXT NOT NULL, "description" TEXT, "type" "InsightReportType" NOT NULL DEFAULT 'EXECUTIVE', "dateFrom" DATE, "dateTo" DATE, "isArchived" BOOLEAN NOT NULL DEFAULT false, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" TIMESTAMP(3) NOT NULL, CONSTRAINT "SavedReport_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "AiInsight" ("id" UUID NOT NULL, "organizationId" UUID NOT NULL, "question" TEXT NOT NULL, "answer" TEXT NOT NULL, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "AiInsight_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "WorkbookConnection" ("id" UUID NOT NULL, "organizationId" UUID NOT NULL, "name" TEXT NOT NULL, "dataSource" TEXT NOT NULL, "fileName" TEXT, "direction" "SyncDirection" NOT NULL DEFAULT 'EXPORT', "status" "SyncStatus" NOT NULL DEFAULT 'ACTIVE', "rowsSynced" INTEGER NOT NULL DEFAULT 0, "lastSyncedAt" TIMESTAMP(3), "errorMessage" TEXT, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" TIMESTAMP(3) NOT NULL, CONSTRAINT "WorkbookConnection_pkey" PRIMARY KEY ("id"));
+CREATE UNIQUE INDEX "SavedReport_organizationId_name_key" ON "SavedReport"("organizationId", "name");
+CREATE INDEX "SavedReport_organizationId_isArchived_idx" ON "SavedReport"("organizationId", "isArchived");
+CREATE INDEX "AiInsight_organizationId_createdAt_idx" ON "AiInsight"("organizationId", "createdAt");
+CREATE UNIQUE INDEX "WorkbookConnection_organizationId_name_key" ON "WorkbookConnection"("organizationId", "name");
+CREATE INDEX "WorkbookConnection_organizationId_status_idx" ON "WorkbookConnection"("organizationId", "status");
+ALTER TABLE "SavedReport" ADD CONSTRAINT "SavedReport_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "AiInsight" ADD CONSTRAINT "AiInsight_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "WorkbookConnection" ADD CONSTRAINT "WorkbookConnection_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
