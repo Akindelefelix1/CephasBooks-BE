@@ -118,6 +118,25 @@ describe('OperationsService', () => {
     expect(update).not.toHaveBeenCalled();
   });
 
+  it('normalizes project dates and tasks before writing them with Prisma', async () => {
+    const create = jest.fn().mockImplementation((request) => Promise.resolve(request));
+    const service = new OperationsService({ project: { create } } as never);
+    await service.createProject('org-a', {
+      code: 'PRJ-2',
+      name: 'Fabric supply',
+      owner: 'Operations',
+      startDate: '2026-09-16',
+      endDate: '2026-09-18',
+      budget: 5_000_000,
+      actualCost: 4_800_000,
+      revenue: 450_000,
+    });
+    const data = (create.mock.calls[0]?.[0] as { data: Record<string, unknown> }).data;
+    expect(data.startDate).toEqual(new Date('2026-09-16T00:00:00.000Z'));
+    expect(data.endDate).toEqual(new Date('2026-09-18T00:00:00.000Z'));
+    expect(data.tasks).toEqual([]);
+  });
+
   it('creates a useful structured project plan', () => {
     const plan = new OperationsService({} as never).plan({
       name: 'Expansion',

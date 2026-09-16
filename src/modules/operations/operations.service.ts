@@ -180,7 +180,9 @@ export class OperationsService {
       throw new BadRequestException('Services cannot have stock movements');
     if (['ISSUE', 'TRANSFER_OUT'].includes(d.type))
       await this.requireStock(org, d.productId, d.warehouseId, d.quantity);
-    return this.db.stockMovement.create({ data: { ...d, organizationId: org } });
+    return this.db.stockMovement.create({
+      data: { ...d, movementDate: this.dateOnly(d.movementDate), organizationId: org },
+    });
   }
   async transfer(org: string, d: TransferDto) {
     if (d.fromWarehouseId === d.toWarehouseId)
@@ -201,7 +203,7 @@ export class OperationsService {
           type: 'TRANSFER_OUT',
           quantity: d.quantity,
           unitCost: d.unitCost,
-          movementDate: d.movementDate,
+          movementDate: this.dateOnly(d.movementDate),
           reference: `${d.reference}-OUT`,
           transferGroupId,
           notes: d.notes,
@@ -215,7 +217,7 @@ export class OperationsService {
           type: 'TRANSFER_IN',
           quantity: d.quantity,
           unitCost: d.unitCost,
-          movementDate: d.movementDate,
+          movementDate: this.dateOnly(d.movementDate),
           reference: `${d.reference}-IN`,
           transferGroupId,
           notes: d.notes,
@@ -250,7 +252,9 @@ export class OperationsService {
     if (product.type === 'SERVICE')
       throw new BadRequestException('Services cannot have stock adjustments');
     if (d.quantityDelta === 0) throw new BadRequestException('Adjustment quantity cannot be zero');
-    return this.db.stockAdjustment.create({ data: { ...d, organizationId: org } });
+    return this.db.stockAdjustment.create({
+      data: { ...d, adjustmentDate: this.dateOnly(d.adjustmentDate), organizationId: org },
+    });
   }
   async adjustmentStatus(org: string, id: string, status: AdjustmentStatus) {
     const adjustment = await this.db.stockAdjustment.findFirst({
@@ -309,7 +313,13 @@ export class OperationsService {
   createProject(org: string, d: ProjectDto) {
     this.validateProject(d);
     return this.db.project.create({
-      data: { ...d, tasks: d.tasks as Prisma.InputJsonValue | undefined, organizationId: org },
+      data: {
+        ...d,
+        startDate: this.dateOnly(d.startDate),
+        endDate: d.endDate ? this.dateOnly(d.endDate) : undefined,
+        tasks: (d.tasks ?? []) as Prisma.InputJsonValue,
+        organizationId: org,
+      },
     });
   }
   async updateProject(org: string, id: string, d: ProjectDto) {
@@ -317,7 +327,12 @@ export class OperationsService {
     this.validateProject(d);
     return this.db.project.update({
       where: { id },
-      data: { ...d, tasks: d.tasks as Prisma.InputJsonValue | undefined },
+      data: {
+        ...d,
+        startDate: this.dateOnly(d.startDate),
+        endDate: d.endDate ? this.dateOnly(d.endDate) : null,
+        tasks: (d.tasks ?? []) as Prisma.InputJsonValue,
+      },
     });
   }
   async projectStatus(org: string, id: string, status: ProjectStatus) {
@@ -371,6 +386,9 @@ export class OperationsService {
   private validateProject(d: ProjectDto) {
     if (d.endDate && new Date(d.endDate) < new Date(d.startDate))
       throw new BadRequestException('Project end date cannot be before start date');
+  }
+  private dateOnly(value: string) {
+    return new Date(`${value.slice(0, 10)}T00:00:00.000Z`);
   }
   private stockMap(
     rows: Array<{
