@@ -37,3 +37,4 @@ export class ReturnPosSaleDto {
   @Type(() => Number) @IsNumber() @Min(0.0001) quantity!: number;
   @IsString() @MaxLength(1000) reason!: string;
 }
+export class VoidPosSaleDto { @IsString() @MaxLength(1000) reason!: string; }

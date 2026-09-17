@@ -64,9 +64,31 @@ export class PosService {
       }
       const sale = await tx.posSale.create({ data: { organizationId: org, customerId: data.customerId || null, registerId: shift.registerId, shiftId: shift.id, warehouseId: warehouse.id, cashierId, idempotencyKey: data.idempotencyKey, discountApprovedBy: discountTotal.gt(0) ? cashierId : null, receiptNumber, currency: 'NGN', subtotal, discountTotal, taxTotal, total, paidAmount: paid, changeAmount: paid.sub(total), items: { create: items.map((x) => ({ productId: x.product.id, description: x.product.name, quantity: x.quantity, unitPrice: x.product.salePrice, discount: x.discount, taxRate: x.product.taxRate, lineTotal: x.total })) }, payments: { create: data.payments } }, include: { items: true, payments: true, customer: true } });
       await Promise.all(items.filter((x) => x.product.type === 'PRODUCT').map((x) => tx.stockMovement.create({ data: { organizationId: org, productId: x.product.id, warehouseId: warehouse.id, type: 'ISSUE', quantity: x.quantity, unitCost: x.product.costPrice, movementDate: new Date(), reference: `${receiptNumber}-${x.product.sku}`, notes: 'POS sale' } })));
+      await this.postSaleJournals(tx, org, receiptNumber, total, taxTotal, credit, items);
       await tx.posAuditLog.create({ data: { organizationId: org, actorId: cashierId, action: 'SALE_COMPLETED', entityType: 'PosSale', entityId: sale.id, metadata: { receiptNumber, registerId: shift.registerId, shiftId: shift.id } } });
       return sale;
     });
+  }
+  async voidSale(org: string, actorId: string, saleId: string, reason: string) {
+    return this.db.$transaction(async (tx) => {
+      const sale = await tx.posSale.findFirst({ where: { id: saleId, organizationId: org, status: 'COMPLETED' }, include: { items: { include: { product: true } }, returns: true } });
+      if (!sale || !sale.warehouseId) throw new NotFoundException('Completed sale not found');
+      if (sale.returns.length) throw new BadRequestException('Use returns for a sale with returned items');
+      const journals = await tx.journal.findMany({ where: { organizationId: org, number: { in: [`POS-${sale.receiptNumber}`, `COGS-${sale.receiptNumber}`] }, status: 'POSTED' } });
+      if (!journals.length) throw new BadRequestException('POS accounting journals not found');
+      for (const journal of journals) { const lines = (journal.lines as Array<{ accountId: string; debit: number; credit: number; memo?: string }>).map((line) => ({ ...line, debit: line.credit, credit: line.debit })); await tx.journal.create({ data: { organizationId: org, number: `VOID-${journal.number}`, journalDate: new Date(), description: `Void ${journal.number}: ${reason}`, status: 'POSTED', postedAt: new Date(), lines, total: journal.total, reversedJournalId: journal.id } }); await tx.journal.update({ where: { id: journal.id }, data: { status: 'REVERSED' } }); }
+      await Promise.all(sale.items.filter((item) => item.product.type === 'PRODUCT').map((item) => tx.stockMovement.create({ data: { organizationId: org, productId: item.productId, warehouseId: sale.warehouseId!, type: 'RECEIPT', quantity: item.quantity, unitCost: item.product.costPrice, movementDate: new Date(), reference: `VOID-${sale.receiptNumber}-${item.id}`, notes: reason } })));
+      await tx.posPayment.updateMany({ where: { saleId }, data: { status: 'REVERSED' } }); const result = await tx.posSale.update({ where: { id: saleId }, data: { status: 'VOIDED' } });
+      await tx.posAuditLog.create({ data: { organizationId: org, actorId, action: 'SALE_VOIDED', entityType: 'PosSale', entityId: saleId, metadata: { receiptNumber: sale.receiptNumber, reason } } }); return result;
+    });
+  }
+  private async postSaleJournals(tx: Prisma.TransactionClient, org: string, receipt: string, total: Prisma.Decimal, tax: Prisma.Decimal, credit: Prisma.Decimal, items: Array<{ product: { type: string; costPrice: Prisma.Decimal }; quantity: Prisma.Decimal }>) {
+    const accounts = [['1000', 'Cash and bank', 'ASSET'], ['1100', 'Accounts receivable', 'ASSET'], ['1300', 'Inventory', 'ASSET'], ['2100', 'Tax payable', 'LIABILITY'], ['4000', 'Sales revenue', 'INCOME'], ['5300', 'Cost of goods sold', 'EXPENSE']] as const;
+    for (const [code, name, type] of accounts) await tx.ledgerAccount.upsert({ where: { organizationId_code: { organizationId: org, code } }, create: { organizationId: org, code, name, type }, update: {} });
+    const ledger = await tx.ledgerAccount.findMany({ where: { organizationId: org, code: { in: accounts.map(([code]) => code) } }, select: { id: true, code: true } }); const id = new Map(ledger.map((account) => [account.code, account.id])); const revenue = total.sub(tax), cash = total.sub(credit), cogs = items.filter((item) => item.product.type === 'PRODUCT').reduce((sum, item) => sum.add(item.product.costPrice.mul(item.quantity)), new Prisma.Decimal(0));
+    const lines = [{ accountId: id.get('1000')!, debit: cash, credit: 0, memo: 'POS payment' }, { accountId: id.get('1100')!, debit: credit, credit: 0, memo: 'POS credit sale' }, { accountId: id.get('4000')!, debit: 0, credit: revenue, memo: 'POS revenue' }, { accountId: id.get('2100')!, debit: 0, credit: tax, memo: 'Output tax' }].filter((line) => new Prisma.Decimal(line.debit).gt(0) || new Prisma.Decimal(line.credit).gt(0));
+    await tx.journal.create({ data: { organizationId: org, number: `POS-${receipt}`, journalDate: new Date(), description: `POS sale ${receipt}`, status: 'POSTED', postedAt: new Date(), lines, total } });
+    if (cogs.gt(0)) await tx.journal.create({ data: { organizationId: org, number: `COGS-${receipt}`, journalDate: new Date(), description: `Inventory cost for POS sale ${receipt}`, status: 'POSTED', postedAt: new Date(), lines: [{ accountId: id.get('5300')!, debit: cogs, credit: 0, memo: 'Cost of goods sold' }, { accountId: id.get('1300')!, debit: 0, credit: cogs, memo: 'Inventory issued' }], total: cogs } });
   }
   async returnItem(org: string, actorId: string, saleId: string, data: { productId: string; quantity: number; reason: string }) {
     return this.db.$transaction(async (tx) => {
