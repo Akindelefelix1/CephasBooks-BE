@@ -25,6 +25,7 @@ export class ProductDto {
   @Type(() => Number) @IsNumber() @Min(0) costPrice!: number;
   @Type(() => Number) @IsNumber() @Min(0) taxRate!: number;
   @Type(() => Number) @IsNumber() @Min(0) reorderLevel!: number;
+  @IsOptional() @IsUUID() defaultWarehouseId?: string;
   @IsOptional() @Type(() => Number) @IsNumber() @Min(0) openingQuantity?: number;
   @IsOptional() @IsUUID() openingWarehouseId?: string;
 }

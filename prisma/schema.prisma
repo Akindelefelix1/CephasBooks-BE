@@ -417,6 +417,7 @@ model Product {
   category       String?
   description    String?
   unit           String            @default("unit")
+  defaultWarehouseId String?       @db.Uuid
   salePrice      Decimal           @default(0) @db.Decimal(19, 4)
   costPrice      Decimal           @default(0) @db.Decimal(19, 4)
   taxRate        Decimal           @default(0) @db.Decimal(7, 4)
@@ -425,6 +426,7 @@ model Product {
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
   organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  defaultWarehouse Warehouse?      @relation("ProductDefaultWarehouse", fields: [defaultWarehouseId], references: [id], onDelete: SetNull)
   movements      StockMovement[]
   adjustments    StockAdjustment[]
   posItems       PosSaleItem[]
@@ -594,6 +596,7 @@ model Warehouse {
   adjustments    StockAdjustment[]
   posRegisters   PosRegister[]
   posSales       PosSale[]
+  defaultProducts Product[]        @relation("ProductDefaultWarehouse")
 
   @@unique([organizationId, code])
   @@index([organizationId, isActive])

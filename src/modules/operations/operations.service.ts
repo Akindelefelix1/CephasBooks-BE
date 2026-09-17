@@ -106,23 +106,26 @@ export class OperationsService {
   }
 
   async createProduct(org: string, d: ProductDto) {
-    const { openingQuantity = 0, openingWarehouseId, ...productData } = d;
-    if (openingQuantity > 0 && !openingWarehouseId)
+    const { openingQuantity = 0, openingWarehouseId, defaultWarehouseId, ...productData } = d;
+    const stockWarehouseId = defaultWarehouseId ?? openingWarehouseId;
+    if (openingQuantity > 0 && !stockWarehouseId)
       throw new BadRequestException('Select a warehouse for opening stock');
     return this.db.$transaction(async (tx) => {
-      if (openingWarehouseId) {
+      if (stockWarehouseId) {
         const warehouse = await tx.warehouse.findFirst({
-          where: { id: openingWarehouseId, organizationId: org, isActive: true },
+          where: { id: stockWarehouseId, organizationId: org, isActive: true },
         });
         if (!warehouse) throw new BadRequestException('Opening-stock warehouse is unavailable');
       }
-      const product = await tx.product.create({ data: { ...productData, organizationId: org } });
-      if (openingQuantity > 0 && openingWarehouseId)
+      const product = await tx.product.create({
+        data: { ...productData, defaultWarehouseId: stockWarehouseId, organizationId: org },
+      });
+      if (openingQuantity > 0 && stockWarehouseId)
         await tx.stockMovement.create({
           data: {
             organizationId: org,
             productId: product.id,
-            warehouseId: openingWarehouseId,
+            warehouseId: stockWarehouseId,
             type: 'RECEIPT',
             quantity: openingQuantity,
             unitCost: product.costPrice,
@@ -136,7 +139,22 @@ export class OperationsService {
   }
   async updateProduct(org: string, id: string, d: ProductDto) {
     await this.product(org, id);
-    return this.db.product.update({ where: { id }, data: d });
+    const {
+      openingQuantity: _openingQuantity,
+      openingWarehouseId: _openingWarehouseId,
+      defaultWarehouseId,
+      ...productData
+    } = d;
+    if (defaultWarehouseId) {
+      const warehouse = await this.db.warehouse.findFirst({
+        where: { id: defaultWarehouseId, organizationId: org, isActive: true },
+      });
+      if (!warehouse) throw new BadRequestException('Selected stock warehouse is unavailable');
+    }
+    return this.db.product.update({
+      where: { id },
+      data: { ...productData, defaultWarehouseId: defaultWarehouseId || null },
+    });
   }
   async productStatus(org: string, id: string, isActive: boolean) {
     await this.product(org, id);
