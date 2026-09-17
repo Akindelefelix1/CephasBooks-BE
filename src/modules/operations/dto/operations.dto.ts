@@ -4,6 +4,7 @@ import {
   IsBoolean,
   IsDateString,
   IsEnum,
+  IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
@@ -24,6 +25,10 @@ export class ProductDto {
   @Type(() => Number) @IsNumber() @Min(0) costPrice!: number;
   @Type(() => Number) @IsNumber() @Min(0) taxRate!: number;
   @Type(() => Number) @IsNumber() @Min(0) reorderLevel!: number;
+}
+
+export class ProductCategoryDto {
+  @IsString() @IsNotEmpty() @MaxLength(100) name!: string;
 }
 
 export class WarehouseDto {

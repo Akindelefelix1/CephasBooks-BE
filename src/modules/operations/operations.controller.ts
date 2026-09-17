@@ -20,6 +20,7 @@ import {
   AdjustmentStatusDto,
   MovementDto,
   ProductDto,
+  ProductCategoryDto,
   ProjectDto,
   ProjectPlanDto,
   ProjectStatusDto,
@@ -37,6 +38,15 @@ export class OperationsController {
   }
   @Get('products') products(@CurrentUser() u: AuthUser, @Query() q: Record<string, string>) {
     return this.operations.products(u.organizationId, q);
+  }
+  @Get('product-categories') categories(@CurrentUser() u: AuthUser) {
+    return this.operations.categories(u.organizationId);
+  }
+  @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT) @Post('product-categories') createCategory(
+    @CurrentUser() u: AuthUser,
+    @Body() d: ProductCategoryDto,
+  ) {
+    return this.operations.createCategory(u.organizationId, d.name);
   }
   @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT) @Post('products') createProduct(
     @CurrentUser() u: AuthUser,

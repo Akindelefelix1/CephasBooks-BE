@@ -87,6 +87,17 @@ export class OperationsService {
     }));
   }
 
+  categories(org: string) {
+    return this.db.productCategory.findMany({ where: { organizationId: org }, orderBy: { name: 'asc' } });
+  }
+  createCategory(org: string, name: string) {
+    return this.db.productCategory.upsert({
+      where: { organizationId_name: { organizationId: org, name: name.trim() } },
+      create: { organizationId: org, name: name.trim() },
+      update: {},
+    });
+  }
+
   createProduct(org: string, d: ProductDto) {
     return this.db.product.create({ data: { ...d, organizationId: org } });
   }
