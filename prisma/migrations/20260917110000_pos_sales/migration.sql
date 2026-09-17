@@ -1,0 +1,10 @@
+CREATE TABLE "PosSale" ("id" UUID NOT NULL,"organizationId" UUID NOT NULL,"customerId" UUID,"receiptNumber" TEXT NOT NULL,"status" TEXT NOT NULL DEFAULT 'COMPLETED',"currency" CHAR(3) NOT NULL DEFAULT 'NGN',"subtotal" DECIMAL(19,4) NOT NULL,"discountTotal" DECIMAL(19,4) NOT NULL DEFAULT 0,"taxTotal" DECIMAL(19,4) NOT NULL DEFAULT 0,"total" DECIMAL(19,4) NOT NULL,"paidAmount" DECIMAL(19,4) NOT NULL DEFAULT 0,"changeAmount" DECIMAL(19,4) NOT NULL DEFAULT 0,"createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,CONSTRAINT "PosSale_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "PosSaleItem" ("id" UUID NOT NULL,"saleId" UUID NOT NULL,"productId" UUID NOT NULL,"description" TEXT NOT NULL,"quantity" DECIMAL(19,4) NOT NULL,"unitPrice" DECIMAL(19,4) NOT NULL,"discount" DECIMAL(19,4) NOT NULL DEFAULT 0,"taxRate" DECIMAL(7,4) NOT NULL DEFAULT 0,"lineTotal" DECIMAL(19,4) NOT NULL,CONSTRAINT "PosSaleItem_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "PosPayment" ("id" UUID NOT NULL,"saleId" UUID NOT NULL,"method" TEXT NOT NULL,"amount" DECIMAL(19,4) NOT NULL,"reference" TEXT,CONSTRAINT "PosPayment_pkey" PRIMARY KEY ("id"));
+CREATE UNIQUE INDEX "PosSale_organizationId_receiptNumber_key" ON "PosSale"("organizationId","receiptNumber");
+CREATE INDEX "PosSale_organizationId_createdAt_idx" ON "PosSale"("organizationId","createdAt");
+ALTER TABLE "PosSale" ADD CONSTRAINT "PosSale_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "PosSale" ADD CONSTRAINT "PosSale_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "PosSaleItem" ADD CONSTRAINT "PosSaleItem_saleId_fkey" FOREIGN KEY ("saleId") REFERENCES "PosSale"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "PosSaleItem" ADD CONSTRAINT "PosSaleItem_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "PosPayment" ADD CONSTRAINT "PosPayment_saleId_fkey" FOREIGN KEY ("saleId") REFERENCES "PosSale"("id") ON DELETE CASCADE ON UPDATE CASCADE;

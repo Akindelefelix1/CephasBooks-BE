@@ -216,6 +216,7 @@ model Organization {
   memberships           Membership[]
   customers             Customer[]
   invoices              Invoice[]
+  posSales              PosSale[]
   auditLogs             AuditLog[]
   bankAccounts          BankAccount[]
   bankTransactions      BankTransaction[]
@@ -395,9 +396,55 @@ model Product {
   organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   movements      StockMovement[]
   adjustments    StockAdjustment[]
+  posItems       PosSaleItem[]
 
   @@unique([organizationId, sku])
   @@index([organizationId, type, isActive])
+}
+
+model PosSale {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @db.Uuid
+  customerId     String?       @db.Uuid
+  receiptNumber  String
+  status         String        @default("COMPLETED")
+  currency       String        @default("NGN") @db.Char(3)
+  subtotal       Decimal       @db.Decimal(19, 4)
+  discountTotal  Decimal       @default(0) @db.Decimal(19, 4)
+  taxTotal       Decimal       @default(0) @db.Decimal(19, 4)
+  total          Decimal       @db.Decimal(19, 4)
+  paidAmount     Decimal       @default(0) @db.Decimal(19, 4)
+  changeAmount   Decimal       @default(0) @db.Decimal(19, 4)
+  createdAt      DateTime      @default(now())
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  customer       Customer?     @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  items          PosSaleItem[]
+  payments       PosPayment[]
+  @@unique([organizationId, receiptNumber])
+  @@index([organizationId, createdAt])
+}
+
+model PosSaleItem {
+  id          String  @id @default(uuid()) @db.Uuid
+  saleId      String  @db.Uuid
+  productId   String  @db.Uuid
+  description String
+  quantity    Decimal @db.Decimal(19, 4)
+  unitPrice   Decimal @db.Decimal(19, 4)
+  discount    Decimal @default(0) @db.Decimal(19, 4)
+  taxRate     Decimal @default(0) @db.Decimal(7, 4)
+  lineTotal   Decimal @db.Decimal(19, 4)
+  sale        PosSale @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product     Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+}
+
+model PosPayment {
+  id        String   @id @default(uuid()) @db.Uuid
+  saleId    String   @db.Uuid
+  method    String
+  amount    Decimal  @db.Decimal(19, 4)
+  reference String?
+  sale      PosSale  @relation(fields: [saleId], references: [id], onDelete: Cascade)
 }
 
 model ProductCategory {
@@ -541,6 +588,7 @@ model Customer {
   quotations     Quotation[]
   payments       PaymentReceived[]
   creditNotes    CreditNote[]
+  posSales       PosSale[]
 
   @@unique([organizationId, email])
   @@index([organizationId, displayName])
