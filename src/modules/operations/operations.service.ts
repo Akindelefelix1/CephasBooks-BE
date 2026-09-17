@@ -98,8 +98,20 @@ export class OperationsService {
     });
   }
 
-  createProduct(org: string, d: ProductDto) {
-    return this.db.product.create({ data: { ...d, organizationId: org } });
+  async createProduct(org: string, d: ProductDto) {
+    const { openingQuantity = 0, openingWarehouseId, ...productData } = d;
+    if (openingQuantity > 0 && !openingWarehouseId)
+      throw new BadRequestException('Select a warehouse for opening stock');
+    return this.db.$transaction(async (tx) => {
+      if (openingWarehouseId) {
+        const warehouse = await tx.warehouse.findFirst({ where: { id: openingWarehouseId, organizationId: org, isActive: true } });
+        if (!warehouse) throw new BadRequestException('Opening-stock warehouse is unavailable');
+      }
+      const product = await tx.product.create({ data: { ...productData, organizationId: org } });
+      if (openingQuantity > 0 && openingWarehouseId)
+        await tx.stockMovement.create({ data: { organizationId: org, productId: product.id, warehouseId: openingWarehouseId, type: 'RECEIPT', quantity: openingQuantity, unitCost: product.costPrice, movementDate: new Date(), reference: `OPEN-${product.sku}-${randomUUID()}`, notes: 'Opening stock on product creation' } });
+      return product;
+    });
   }
   async updateProduct(org: string, id: string, d: ProductDto) {
     await this.product(org, id);

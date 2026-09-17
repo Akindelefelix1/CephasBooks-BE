@@ -6,9 +6,12 @@ export class PosService {
   constructor(private readonly db: PrismaService) {}
   list(org: string) { return this.db.posSale.findMany({ where: { organizationId: org }, include: { items: true, payments: true, customer: true }, orderBy: { createdAt: 'desc' } }); }
   registers(org: string) { return this.db.posRegister.findMany({ where: { organizationId: org, isActive: true }, include: { warehouse: true }, orderBy: { code: 'asc' } }); }
-  createRegister(org: string, data: { warehouseId: string; code: string; name: string }) {
+  async createRegister(org: string, data: { warehouseId: string; code: string; name: string }) {
+    const warehouse = await this.db.warehouse.findFirst({ where: { id: data.warehouseId, organizationId: org, isActive: true } });
+    if (!warehouse) throw new BadRequestException('Select an active warehouse for this register');
     return this.db.posRegister.create({ data: { ...data, organizationId: org } });
   }
+  currentShift(org: string, cashierId: string) { return this.db.posShift.findFirst({ where: { organizationId: org, cashierId, status: 'OPEN' }, include: { register: true }, orderBy: { openedAt: 'desc' } }); }
   async openShift(org: string, cashierId: string, data: { registerId: string; openingCash: number }) {
     const register = await this.db.posRegister.findFirst({ where: { id: data.registerId, organizationId: org, isActive: true } });
     if (!register) throw new NotFoundException('Active register not found');

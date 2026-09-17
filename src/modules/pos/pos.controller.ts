@@ -12,7 +12,9 @@ export class PosController {
   constructor(private readonly pos: PosService) {}
   @Get('sales') list(@CurrentUser() u: AuthUser) { return this.pos.list(u.organizationId); }
   @Get('registers') registers(@CurrentUser() u: AuthUser) { return this.pos.registers(u.organizationId); }
+  @Roles(Role.OWNER, Role.ADMIN)
   @Post('registers') createRegister(@CurrentUser() u: AuthUser, @Body() data: CreateRegisterDto) { return this.pos.createRegister(u.organizationId, data); }
+  @Get('shifts/current') currentShift(@CurrentUser() u: AuthUser) { return this.pos.currentShift(u.organizationId, u.sub); }
   @Post('shifts') openShift(@CurrentUser() u: AuthUser, @Body() data: OpenShiftDto) { return this.pos.openShift(u.organizationId, u.sub, data); }
   @Post('shifts/:id/close') closeShift(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() data: CloseShiftDto) { return this.pos.closeShift(u.organizationId, u.sub, id, data); }
   @Post('sales') complete(@CurrentUser() u: AuthUser, @Body() data: CompletePosSaleDto) { return this.pos.complete(u.organizationId, u.sub, u.role, data); }
