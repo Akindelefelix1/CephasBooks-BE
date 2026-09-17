@@ -19,6 +19,17 @@ export class InvoicesService {
       orderBy: { createdAt: 'desc' },
     });
   }
+  async nextNumber(organizationId: string) {
+    const invoices = await this.prisma.invoice.findMany({
+      where: { organizationId },
+      select: { number: true },
+    });
+    const last = invoices.reduce((highest, invoice) => {
+      const match = /^INV-(\d+)$/i.exec(invoice.number);
+      return match ? Math.max(highest, Number(match[1])) : highest;
+    }, 0);
+    return { number: `INV-${String(last + 1).padStart(5, '0')}` };
+  }
   async get(organizationId: string, id: string) {
     const invoice = await this.prisma.invoice.findFirst({
       where: { id, organizationId },
@@ -44,11 +55,12 @@ export class InvoicesService {
       new Prisma.Decimal(0),
     );
     const total = items.reduce((sum, item) => sum.add(item.lineTotal), new Prisma.Decimal(0));
+    const number = (await this.nextNumber(organizationId)).number;
     const invoice = await this.prisma.invoice.create({
       data: {
         organizationId,
         customerId: dto.customerId,
-        number: dto.number,
+        number,
         status: dto.status,
         currency: dto.currency.toUpperCase(),
         issueDate: new Date(dto.issueDate),

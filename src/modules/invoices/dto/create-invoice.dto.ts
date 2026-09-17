@@ -25,7 +25,7 @@ export class InvoiceItemDto {
 
 export class CreateInvoiceDto {
   @ApiProperty() @IsUUID() customerId!: string;
-  @ApiProperty() @IsString() @MaxLength(50) number!: string;
+  @ApiPropertyOptional({ readOnly: true }) @IsOptional() @IsString() @MaxLength(50) number?: string;
   @ApiProperty({ enum: InvoiceStatus }) @IsOptional() @IsEnum(InvoiceStatus) status?: InvoiceStatus;
   @ApiProperty({ default: 'NGN' }) @IsISO4217CurrencyCode() currency = 'NGN';
   @ApiProperty() @IsDateString() issueDate!: string;

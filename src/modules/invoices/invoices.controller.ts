@@ -17,6 +17,9 @@ export class InvoicesController {
   @Get() list(@CurrentUser() user: AuthUser) {
     return this.invoices.list(user.organizationId);
   }
+  @Get('next-number') nextNumber(@CurrentUser() user: AuthUser) {
+    return this.invoices.nextNumber(user.organizationId);
+  }
   @Get(':id') get(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.invoices.get(user.organizationId, id);
   }
