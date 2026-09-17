@@ -75,7 +75,11 @@ export class OperationsService {
     const ids = products.map((x) => x.id);
     const movements = ids.length
       ? await this.db.stockMovement.findMany({
-          where: { organizationId: org, productId: { in: ids } },
+          where: {
+            organizationId: org,
+            productId: { in: ids },
+            ...(q.warehouseId ? { warehouseId: q.warehouseId } : {}),
+          },
           select: { productId: true, type: true, quantity: true, unitCost: true },
         })
       : [];
@@ -88,7 +92,10 @@ export class OperationsService {
   }
 
   categories(org: string) {
-    return this.db.productCategory.findMany({ where: { organizationId: org }, orderBy: { name: 'asc' } });
+    return this.db.productCategory.findMany({
+      where: { organizationId: org },
+      orderBy: { name: 'asc' },
+    });
   }
   createCategory(org: string, name: string) {
     return this.db.productCategory.upsert({
@@ -104,12 +111,26 @@ export class OperationsService {
       throw new BadRequestException('Select a warehouse for opening stock');
     return this.db.$transaction(async (tx) => {
       if (openingWarehouseId) {
-        const warehouse = await tx.warehouse.findFirst({ where: { id: openingWarehouseId, organizationId: org, isActive: true } });
+        const warehouse = await tx.warehouse.findFirst({
+          where: { id: openingWarehouseId, organizationId: org, isActive: true },
+        });
         if (!warehouse) throw new BadRequestException('Opening-stock warehouse is unavailable');
       }
       const product = await tx.product.create({ data: { ...productData, organizationId: org } });
       if (openingQuantity > 0 && openingWarehouseId)
-        await tx.stockMovement.create({ data: { organizationId: org, productId: product.id, warehouseId: openingWarehouseId, type: 'RECEIPT', quantity: openingQuantity, unitCost: product.costPrice, movementDate: new Date(), reference: `OPEN-${product.sku}-${randomUUID()}`, notes: 'Opening stock on product creation' } });
+        await tx.stockMovement.create({
+          data: {
+            organizationId: org,
+            productId: product.id,
+            warehouseId: openingWarehouseId,
+            type: 'RECEIPT',
+            quantity: openingQuantity,
+            unitCost: product.costPrice,
+            movementDate: new Date(),
+            reference: `OPEN-${product.sku}-${randomUUID()}`,
+            notes: 'Opening stock on product creation',
+          },
+        });
       return product;
     });
   }

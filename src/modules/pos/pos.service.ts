@@ -147,6 +147,15 @@ export class PosService {
       const total = subtotal.sub(discountTotal).add(taxTotal),
         paid = data.payments.reduce((sum, p) => sum.add(p.amount), new Prisma.Decimal(0));
       if (paid.lt(total)) throw new BadRequestException('Payment is less than the total due');
+      const nonCashPaid = data.payments
+        .filter((payment) => payment.method !== 'CASH')
+        .reduce((sum, payment) => sum.add(payment.amount), new Prisma.Decimal(0));
+      if (nonCashPaid.gt(total))
+        throw new BadRequestException(
+          'Card, transfer, and credit payments cannot exceed the total due',
+        );
+      if (paid.gt(total) && !data.payments.some((payment) => payment.method === 'CASH'))
+        throw new BadRequestException('Only cash payments can exceed the total due');
       if (discountTotal.gt(0) && !['OWNER', 'ADMIN', 'APPROVER'].includes(role))
         throw new BadRequestException('Discounts require an approved role');
       const credit = data.payments
