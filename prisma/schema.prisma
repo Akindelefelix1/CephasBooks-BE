@@ -123,6 +123,32 @@ enum StockMovementType {
   ADJUSTMENT
 }
 
+enum PosSaleStatus {
+  HELD
+  COMPLETED
+  VOIDED
+  REFUNDED
+}
+
+enum PosPaymentMethod {
+  CASH
+  CARD
+  TRANSFER
+  CREDIT
+}
+
+enum PosPaymentStatus {
+  PENDING
+  APPROVED
+  DECLINED
+  REVERSED
+}
+
+enum PosShiftStatus {
+  OPEN
+  CLOSED
+}
+
 enum AdjustmentStatus {
   DRAFT
   APPROVED
@@ -217,6 +243,11 @@ model Organization {
   customers             Customer[]
   invoices              Invoice[]
   posSales              PosSale[]
+  posRegisters          PosRegister[]
+  posShifts             PosShift[]
+  posAuditLogs          PosAuditLog[]
+  posReturns            PosReturn[]
+  posIdempotencyKeys    PosIdempotencyKey[]
   auditLogs             AuditLog[]
   bankAccounts          BankAccount[]
   bankTransactions      BankTransaction[]
@@ -397,6 +428,7 @@ model Product {
   movements      StockMovement[]
   adjustments    StockAdjustment[]
   posItems       PosSaleItem[]
+  posReturns     PosReturn[]
 
   @@unique([organizationId, sku])
   @@index([organizationId, type, isActive])
@@ -407,7 +439,13 @@ model PosSale {
   organizationId String        @db.Uuid
   customerId     String?       @db.Uuid
   receiptNumber  String
-  status         String        @default("COMPLETED")
+  registerId     String?       @db.Uuid
+  shiftId        String?       @db.Uuid
+  warehouseId    String?       @db.Uuid
+  cashierId      String?       @db.Uuid
+  status         PosSaleStatus @default(COMPLETED)
+  idempotencyKey String?
+  discountApprovedBy String? @db.Uuid
   currency       String        @default("NGN") @db.Char(3)
   subtotal       Decimal       @db.Decimal(19, 4)
   discountTotal  Decimal       @default(0) @db.Decimal(19, 4)
@@ -420,7 +458,12 @@ model PosSale {
   customer       Customer?     @relation(fields: [customerId], references: [id], onDelete: Restrict)
   items          PosSaleItem[]
   payments       PosPayment[]
+  returns        PosReturn[]
+  register       PosRegister?  @relation(fields: [registerId], references: [id], onDelete: Restrict)
+  shift          PosShift?     @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+  warehouse      Warehouse?    @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
   @@unique([organizationId, receiptNumber])
+  @@unique([organizationId, idempotencyKey])
   @@index([organizationId, createdAt])
 }
 
@@ -441,10 +484,87 @@ model PosSaleItem {
 model PosPayment {
   id        String   @id @default(uuid()) @db.Uuid
   saleId    String   @db.Uuid
-  method    String
+  method    PosPaymentMethod
+  status    PosPaymentStatus @default(APPROVED)
   amount    Decimal  @db.Decimal(19, 4)
   reference String?
   sale      PosSale  @relation(fields: [saleId], references: [id], onDelete: Cascade)
+}
+
+model PosRegister {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  warehouseId    String       @db.Uuid
+  code           String
+  name           String
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  warehouse      Warehouse    @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  shifts         PosShift[]
+  sales          PosSale[]
+  @@unique([organizationId, code])
+  @@index([organizationId, warehouseId, isActive])
+}
+
+model PosShift {
+  id             String         @id @default(uuid()) @db.Uuid
+  organizationId String         @db.Uuid
+  registerId     String         @db.Uuid
+  cashierId      String         @db.Uuid
+  status         PosShiftStatus @default(OPEN)
+  openingCash    Decimal        @db.Decimal(19, 4)
+  closingCash    Decimal?       @db.Decimal(19, 4)
+  expectedCash   Decimal?       @db.Decimal(19, 4)
+  variance       Decimal?       @db.Decimal(19, 4)
+  openedAt       DateTime       @default(now())
+  closedAt       DateTime?
+  closeNotes     String?
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  register       PosRegister    @relation(fields: [registerId], references: [id], onDelete: Restrict)
+  sales          PosSale[]
+  @@index([organizationId, cashierId, status])
+  @@index([registerId, status])
+}
+
+model PosIdempotencyKey {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  key            String
+  saleId         String?      @db.Uuid
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  @@unique([organizationId, key])
+}
+
+model PosAuditLog {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  actorId        String?      @db.Uuid
+  action         String
+  entityType     String
+  entityId       String?
+  metadata       Json         @default("{}")
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  @@index([organizationId, createdAt])
+}
+
+model PosReturn {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  saleId         String       @db.Uuid
+  productId      String       @db.Uuid
+  quantity       Decimal      @db.Decimal(19, 4)
+  amount         Decimal      @db.Decimal(19, 4)
+  reason         String
+  processedBy    String       @db.Uuid
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  sale           PosSale      @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  product        Product      @relation(fields: [productId], references: [id], onDelete: Restrict)
+  @@index([organizationId, saleId])
 }
 
 model ProductCategory {
@@ -472,6 +592,8 @@ model Warehouse {
   organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   movements      StockMovement[]
   adjustments    StockAdjustment[]
+  posRegisters   PosRegister[]
+  posSales       PosSale[]
 
   @@unique([organizationId, code])
   @@index([organizationId, isActive])
@@ -580,6 +702,7 @@ model Customer {
   taxId          String?
   billingAddress String?
   notes          String?
+  creditLimit    Decimal           @default(0) @db.Decimal(19, 4)
   isActive       Boolean           @default(true)
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
