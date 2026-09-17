@@ -21,6 +21,11 @@ export class InvoicesController {
     return this.invoices.get(user.organizationId, id);
   }
   @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT)
+  @Post(':id/send')
+  send(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.invoices.send(user.organizationId, id);
+  }
+  @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT)
   @Post()
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateInvoiceDto) {
     return this.invoices.create(user.organizationId, dto);
