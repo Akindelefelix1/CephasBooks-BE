@@ -15,6 +15,7 @@ import {
 import { LoginDto } from './dto/login.dto.ts';
 import { RegisterDto } from './dto/register.dto.ts';
 import { VerifyEmailDto } from './dto/verify-email.dto.ts';
+import { UpdateProfileDto } from './dto/update-profile.dto.ts';
 
 export interface Tokens {
   accessToken: string;
@@ -91,7 +92,7 @@ export class AuthService {
     const [user, organization] = await Promise.all([
       this.prisma.user.findUniqueOrThrow({
         where: { id: userId },
-        select: { firstName: true, lastName: true, email: true },
+        select: { firstName: true, lastName: true, email: true, createdAt: true, isActive: true },
       }),
       this.prisma.organization.findUniqueOrThrow({
         where: { id: organizationId },
@@ -99,6 +100,22 @@ export class AuthService {
       }),
     ]);
     return { ...user, role, organization };
+  }
+
+  async updateProfile(userId: string, organizationId: string, role: string, dto: UpdateProfileDto) {
+    const profile = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        ...(dto.firstName !== undefined ? { firstName: dto.firstName.trim() || null } : {}),
+        ...(dto.lastName !== undefined ? { lastName: dto.lastName.trim() || null } : {}),
+      },
+      select: { firstName: true, lastName: true, email: true, createdAt: true, isActive: true },
+    });
+    const organization = await this.prisma.organization.findUniqueOrThrow({
+      where: { id: organizationId },
+      select: { name: true, baseCurrency: true, countryCode: true },
+    });
+    return { ...profile, role, organization };
   }
 
   async verifyEmail(dto: VerifyEmailDto): Promise<Tokens> {

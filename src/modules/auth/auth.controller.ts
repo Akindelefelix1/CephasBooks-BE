@@ -1,4 +1,4 @@
-﻿import { Body, Controller, Get, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs/common';
+﻿import { Body, Controller, Get, HttpCode, HttpStatus, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { CurrentUser, type AuthUser } from '../../common/decorators/current-user.decorator.ts';
@@ -7,6 +7,7 @@ import { LoginDto } from './dto/login.dto.ts';
 import { RefreshDto } from './dto/refresh.dto.ts';
 import { RegisterDto } from './dto/register.dto.ts';
 import { ResendVerificationDto, VerifyEmailDto } from './dto/verify-email.dto.ts';
+import { UpdateProfileDto } from './dto/update-profile.dto.ts';
 
 @ApiTags('Authentication')
 @Controller('auth')
@@ -34,5 +35,11 @@ export class AuthController {
   }
   @ApiBearerAuth() @UseGuards(AuthGuard('jwt')) @Get('me') me(@CurrentUser() user: AuthUser) {
     return this.auth.getProfile(user.sub, user.organizationId, user.role);
+  }
+  @ApiBearerAuth() @UseGuards(AuthGuard('jwt')) @Patch('me') updateProfile(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: UpdateProfileDto,
+  ) {
+    return this.auth.updateProfile(user.sub, user.organizationId, user.role, dto);
   }
 }
