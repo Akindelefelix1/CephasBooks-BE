@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsEnum, IsOptional, IsString, IsUUID, MaxLength, Min, IsNumber, ValidateNested } from 'class-validator';
+import { ArrayMinSize, IsArray, IsEnum, IsOptional, IsString, IsUUID, MaxLength, Min, IsDateString, IsInt, Max, IsNumber, ValidateNested } from 'class-validator';
 import { PosPaymentMethod } from '@prisma/client';
 
 export class PosLineDto {
@@ -18,6 +18,14 @@ export class CompletePosSaleDto {
   @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => PosLineDto) items!: PosLineDto[];
   @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => PosPaymentDto) payments!: PosPaymentDto[];
   @IsOptional() @IsString() @MaxLength(128) idempotencyKey?: string;
+}
+export class ListPosSalesDto {
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) page = 1;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) limit = 10;
+  @IsOptional() @IsDateString() from?: string;
+  @IsOptional() @IsDateString() to?: string;
+  @IsOptional() @IsUUID() customerId?: string;
+  @IsOptional() @IsString() @MaxLength(120) search?: string;
 }
 export class OpenShiftDto {
   @IsUUID() registerId!: string;

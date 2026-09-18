@@ -3,9 +3,9 @@ import { IsEmail, IsNotEmpty, IsString, Length, Matches, MaxLength } from 'class
 
 export class RegisterDto {
   @ApiProperty({ example: 'ada@example.com' }) @IsEmail() @MaxLength(254) email!: string;
-  @ApiProperty({ minLength: 12 })
+  @ApiProperty({ minLength: 8 })
   @IsString()
-  @Length(12, 128)
+  @Length(8, 128)
   @Matches(/[a-z]/, { message: 'password must contain a lowercase letter' })
   @Matches(/[A-Z]/, { message: 'password must contain an uppercase letter' })
   @Matches(/\d/, { message: 'password must contain a number' })

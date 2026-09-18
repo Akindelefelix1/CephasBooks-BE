@@ -4,12 +4,45 @@ import { PrismaService } from '../../database/prisma.service.ts';
 @Injectable()
 export class PosService {
   constructor(private readonly db: PrismaService) {}
-  list(org: string) {
-    return this.db.posSale.findMany({
-      where: { organizationId: org },
-      include: { items: true, payments: true, customer: true },
-      orderBy: { createdAt: 'desc' },
-    });
+  async list(
+    org: string,
+    query: { page?: number; limit?: number; from?: string; to?: string; customerId?: string; search?: string },
+  ) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const endDate = query.to ? new Date(query.to) : undefined;
+    if (endDate && /^\d{4}-\d{2}-\d{2}$/.test(query.to!)) endDate.setDate(endDate.getDate() + 1);
+    const where: Prisma.PosSaleWhereInput = {
+      organizationId: org,
+      ...(query.customerId ? { customerId: query.customerId } : {}),
+      ...(query.from || query.to
+        ? {
+            createdAt: {
+              ...(query.from ? { gte: new Date(query.from) } : {}),
+              ...(endDate ? { lt: endDate } : {}),
+            },
+          }
+        : {}),
+      ...(query.search
+        ? {
+            OR: [
+              { receiptNumber: { contains: query.search, mode: 'insensitive' } },
+              { customer: { displayName: { contains: query.search, mode: 'insensitive' } } },
+            ],
+          }
+        : {}),
+    };
+    const [data, total] = await this.db.$transaction([
+      this.db.posSale.findMany({
+        where,
+        include: { items: true, payments: true, customer: true },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.db.posSale.count({ where }),
+    ]);
+    return { data, meta: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) } };
   }
   registers(org: string) {
     return this.db.posRegister.findMany({
