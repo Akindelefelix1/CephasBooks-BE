@@ -17,6 +17,7 @@ import {
 } from 'class-validator';
 
 export class InvoiceItemDto {
+  @ApiProperty() @IsString() @MaxLength(160) name!: string;
   @ApiProperty() @IsString() @MaxLength(500) description!: string;
   @ApiProperty() @IsNumber({ maxDecimalPlaces: 4 }) @Min(0.0001) quantity!: number;
   @ApiProperty() @IsNumber({ maxDecimalPlaces: 4 }) @Min(0) unitPrice!: number;

@@ -21,6 +21,7 @@ import {
   PurchaseRequestStatus,
 } from '@prisma/client';
 export class PurchaseLineDto {
+  @IsString() @MaxLength(160) name!: string;
   @IsString() @MaxLength(500) description!: string;
   @Type(() => Number) @IsNumber() @Min(0.0001) quantity!: number;
   @Type(() => Number) @IsNumber() @Min(0) unitPrice!: number;

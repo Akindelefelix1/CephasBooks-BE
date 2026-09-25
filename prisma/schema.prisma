@@ -851,6 +851,7 @@ model CreditNote {
 model InvoiceItem {
   id          String  @id @default(uuid()) @db.Uuid
   invoiceId   String  @db.Uuid
+  name        String  @default("")
   description String
   quantity    Decimal @db.Decimal(19, 4)
   unitPrice   Decimal @db.Decimal(19, 4)

@@ -132,6 +132,7 @@ export class SalesService {
     if (quote.status === 'CONVERTED' || quote.status === 'VOID')
       throw new BadRequestException('Quotation cannot be converted');
     const items = quote.items as unknown as Array<{
+      name?: string;
       description: string;
       quantity: number;
       unitPrice: number;
@@ -155,7 +156,11 @@ export class SalesService {
           items: {
             create: items.map((x) => {
               const base = new Prisma.Decimal(x.quantity).mul(x.unitPrice);
-              return { ...x, lineTotal: base.add(base.mul(x.taxRate ?? 0).div(100)) };
+              return {
+                ...x,
+                name: x.name || x.description,
+                lineTotal: base.add(base.mul(x.taxRate ?? 0).div(100)),
+              };
             }),
           },
         },
