@@ -46,6 +46,12 @@ export class CustomersController {
   @Get(':id') get(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.customers.get(u.organizationId, id);
   }
+  @Get(':id/purchase-history') purchaseHistory(
+    @CurrentUser() u: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.customers.purchaseHistory(u.organizationId, id);
+  }
   @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT)
   @Patch(':id') update(
     @CurrentUser() u: AuthUser,

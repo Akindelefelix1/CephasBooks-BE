@@ -36,6 +36,15 @@ export class CustomersService {
     if (!customer) throw new NotFoundException('Customer not found');
     return customer;
   }
+  async purchaseHistory(organizationId: string, id: string) {
+    await this.get(organizationId, id);
+    return this.prisma.invoice.findMany({
+      where: { organizationId, customerId: id },
+      include: { customer: true, items: true },
+      orderBy: [{ issueDate: 'desc' }, { createdAt: 'desc' }],
+      take: 200,
+    });
+  }
   async update(organizationId: string, id: string, dto: UpdateCustomerDto) {
     await this.get(organizationId, id);
     return this.prisma.customer.update({ where: { id }, data: dto });
