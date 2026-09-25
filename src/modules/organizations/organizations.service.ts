@@ -17,6 +17,7 @@ import { PrismaService } from '../../database/prisma.service.ts';
 import { MailService } from '../mail/mail.service.ts';
 import * as argon2 from 'argon2';
 import { randomBytes } from 'node:crypto';
+import { isISO4217CurrencyCode } from 'class-validator';
 
 const STEP_ORDER = ['business', 'financial', 'structure', 'tax', 'team'] as const;
 type StepName = (typeof STEP_ORDER)[number];
@@ -82,6 +83,14 @@ export class OrganizationsService {
 
   async updateOrganization(actor: AuthUser, dto: UpdateOrganizationDto) {
     return this.prisma.$transaction(async (tx) => {
+      const current = await tx.organization.findUniqueOrThrow({
+        where: { id: actor.organizationId },
+        select: { baseCurrency: true },
+      });
+      if (dto.baseCurrency && dto.baseCurrency !== current.baseCurrency)
+        throw new BadRequestException(
+          'Change the default currency through Currency management so exchange rates stay synchronized',
+        );
       const organization = await tx.organization.update({
         where: { id: actor.organizationId },
         data: dto,
@@ -121,6 +130,9 @@ export class OrganizationsService {
       const updated = await tx.organization.update({
         where: { id: actor.organizationId },
         data: {
+          ...(section === 'currencies' && typeof data.defaultCurrency === 'string'
+            ? { baseCurrency: data.defaultCurrency }
+            : {}),
           onboardingData: {
             ...root,
             admin: { ...admin, [section]: data },
@@ -724,6 +736,28 @@ export class OrganizationsService {
     if (section === 'branches' || section === 'currencies' || section === 'integrations') {
       if (!Array.isArray(items)) throw new BadRequestException('Settings items must be an array');
       if (items.length > 100) throw new BadRequestException('A maximum of 100 items is supported');
+    }
+    if (section === 'currencies' && Array.isArray(items)) {
+      const currencies = items.map((item) => item as Record<string, unknown>);
+      const codes = currencies.map((item) => String(item.code || '').toUpperCase());
+      if (!currencies.length) throw new BadRequestException('Select at least one currency');
+      if (new Set(codes).size !== codes.length)
+        throw new ConflictException('Each currency can only be selected once');
+      if (codes.some((code) => !isISO4217CurrencyCode(code)))
+        throw new BadRequestException('Currency codes must be valid ISO 4217 codes');
+      if (
+        currencies.some((item) => {
+          const rate = Number(item.rate);
+          return !Number.isFinite(rate) || rate <= 0;
+        })
+      )
+        throw new BadRequestException('Every currency must have a positive exchange rate');
+      const defaultCurrency = String(data.defaultCurrency || '').toUpperCase();
+      const selectedDefault = currencies.find((item) => String(item.code).toUpperCase() === defaultCurrency);
+      if (!selectedDefault || selectedDefault.active === false)
+        throw new BadRequestException('The default currency must be selected and active');
+      if (Number(selectedDefault.rate) !== 1)
+        throw new BadRequestException('The default currency exchange rate must be 1');
     }
     if (section === 'branches' && Array.isArray(items)) {
       const branches = items.map((item) => item as Record<string, unknown>);

@@ -107,4 +107,24 @@ describe('OrganizationsService onboarding', () => {
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
+
+  it('rejects a default currency that is not active in the selected list', async () => {
+    const transaction = jest.fn();
+    const service = new OrganizationsService({ $transaction: transaction } as never);
+
+    await expect(
+      service.updateSection(
+        { sub: 'owner-a', email: 'owner@example.com', organizationId: 'org-a', role: 'OWNER' },
+        'currencies',
+        {
+          defaultCurrency: 'USD',
+          items: [
+            { code: 'NGN', name: 'Nigerian naira', symbol: '₦', rate: '1', active: true },
+            { code: 'USD', name: 'US dollar', symbol: '$', rate: '1', active: false },
+          ],
+        },
+      ),
+    ).rejects.toThrow('default currency must be selected and active');
+    expect(transaction).not.toHaveBeenCalled();
+  });
 });

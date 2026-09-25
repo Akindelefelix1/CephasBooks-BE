@@ -146,6 +146,10 @@ export class PosService {
     if (!data.items?.length || !data.payments?.length)
       throw new BadRequestException('Items and payment are required');
     return this.db.$transaction(async (tx) => {
+      const organization = await tx.organization.findUniqueOrThrow({
+        where: { id: org },
+        select: { baseCurrency: true },
+      });
       if (data.idempotencyKey) {
         const prior = await tx.posSale.findFirst({
           where: { organizationId: org, idempotencyKey: data.idempotencyKey },
@@ -266,7 +270,7 @@ export class PosService {
           idempotencyKey: data.idempotencyKey,
           discountApprovedBy: discountTotal.gt(0) ? cashierId : null,
           receiptNumber,
-          currency: 'NGN',
+          currency: organization.baseCurrency,
           subtotal,
           discountTotal,
           taxTotal,
