@@ -12,6 +12,7 @@ import {
   IsArray,
   ArrayUnique,
   IsUUID,
+  IsNotEmpty,
   MaxLength,
 } from 'class-validator';
 
@@ -29,8 +30,8 @@ export class InviteOrganizationUserDto {
   @IsEmail() email!: string;
   @IsEnum(Role) role!: Role;
   @IsOptional() @IsUUID() customRoleId?: string;
-  @IsOptional() @IsString() @MaxLength(80) firstName?: string;
-  @IsOptional() @IsString() @MaxLength(80) lastName?: string;
+  @IsString() @IsNotEmpty() @MaxLength(80) firstName!: string;
+  @IsString() @IsNotEmpty() @MaxLength(80) lastName!: string;
   @IsOptional() @IsString() @MaxLength(40) phone?: string;
   @IsOptional() @IsString() @MaxLength(500) address?: string;
 }

@@ -175,10 +175,14 @@ export class OrganizationsService {
       throw new BadRequestException('Ownership cannot be assigned from user management');
     const existing = await this.prisma.user.findUnique({
       where: { email },
-      include: { memberships: { where: { organizationId: actor.organizationId } } },
+      include: { memberships: true },
     });
-    if (existing?.memberships.length)
+    if (existing?.memberships.some((item) => item.organizationId === actor.organizationId))
       throw new ConflictException('This user already belongs to the organisation');
+    if (existing?.memberships.length)
+      throw new ConflictException(
+        'This email belongs to another organisation. Use a unique work email for this staff member.',
+      );
     if (existing && (!existing.verifiedAt || !existing.isActive))
       throw new BadRequestException('The user account must be verified and active first');
     const customRole = dto.customRoleId
@@ -263,6 +267,12 @@ export class OrganizationsService {
     } catch {
       // Do not leave an inaccessible staff account behind when credential delivery fails.
       await this.prisma.$transaction(async (tx) => {
+        await tx.auditLog.deleteMany({
+          where: { organizationId: actor.organizationId, entityId: membership.id },
+        });
+        await tx.appNotification.deleteMany({
+          where: { organizationId: actor.organizationId, relatedId: membership.id },
+        });
         await tx.membership.delete({ where: { id: membership.id } });
         if (temporaryPassword) await tx.user.delete({ where: { id: membership.user.id } });
       });
@@ -274,7 +284,7 @@ export class OrganizationsService {
   }
 
   private temporaryPassword() {
-    return `Cb!${randomBytes(9).toString('base64url')}`;
+    return `Cb!7${randomBytes(9).toString('base64url')}`;
   }
 
   private escapeHtml(value: string) {
@@ -397,8 +407,20 @@ export class OrganizationsService {
 
   async createRole(actor: AuthUser, dto: CustomRoleDto) {
     this.validateRole(dto);
-    return this.prisma.customRole.create({
-      data: { ...dto, name: dto.name.trim(), organizationId: actor.organizationId },
+    return this.prisma.$transaction(async (tx) => {
+      const created = await tx.customRole.create({
+        data: { ...dto, name: dto.name.trim(), organizationId: actor.organizationId },
+      });
+      await this.recordActivity(
+        tx,
+        actor,
+        'CUSTOM_ROLE_CREATED',
+        'CustomRole',
+        created.id,
+        'Access profile created',
+        `${created.name} was created with ${dto.permissions.length} permissions.`,
+      );
+      return created;
     });
   }
 
@@ -427,6 +449,15 @@ export class OrganizationsService {
           data: { revokedAt: new Date() },
         });
       }
+      await this.recordActivity(
+        tx,
+        actor,
+        'CUSTOM_ROLE_UPDATED',
+        'CustomRole',
+        updated.id,
+        'Access profile updated',
+        `${updated.name} permissions or access boundary were updated.`,
+      );
       return updated;
     });
   }
@@ -439,11 +470,23 @@ export class OrganizationsService {
     if (!role) throw new NotFoundException('Custom role not found');
     if (role._count.memberships > 0)
       throw new ConflictException('Reassign users before deleting this role');
-    await this.prisma.customRole.delete({ where: { id } });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.customRole.delete({ where: { id } });
+      await this.recordActivity(
+        tx,
+        actor,
+        'CUSTOM_ROLE_DELETED',
+        'CustomRole',
+        id,
+        'Access profile deleted',
+        `${role.name} was deleted.`,
+      );
+    });
     return { deleted: true };
   }
 
   private validateRole(dto: CustomRoleDto) {
+    if (!dto.name.trim()) throw new BadRequestException('Role name is required');
     if (dto.baseRole === 'OWNER')
       throw new BadRequestException('Custom roles cannot grant owner access');
     if (dto.permissions.some((permission) => !ROLE_PERMISSIONS.includes(permission as never)))
