@@ -6,6 +6,7 @@ import { assertBranch } from '../../common/branch-scope.ts';
 import {
   CreateBankAccountDto,
   CreateBankTransactionDto,
+  CreateBankTransactionsDto,
   CreateTransferDto,
   ImportTransactionsDto,
   UpdateBankAccountDto,
@@ -245,6 +246,7 @@ export class BankingService {
           branchId: dto.branchId,
           bankAccountId: dto.bankAccountId,
           transactionDate: new Date(dto.transactionDate),
+          name: dto.name,
           description: dto.description,
           reference: dto.reference,
           type: dto.type,
@@ -255,6 +257,33 @@ export class BankingService {
       });
       await this.recalculateAccount(tx, organizationId, account.id);
       return transaction;
+    });
+  }
+
+  async createTransactions(organizationId: string, dto: CreateBankTransactionsDto) {
+    await assertBranch(this.prisma, organizationId, undefined);
+    const account = await this.account(organizationId, dto.bankAccountId);
+    if (!account.isActive) throw new BadRequestException('Bank account is archived');
+    return this.serializable(async (tx) => {
+      const created = [];
+      for (const row of dto.transactions) {
+        created.push(await tx.bankTransaction.create({
+          data: {
+            organizationId,
+            bankAccountId: dto.bankAccountId,
+            transactionDate: new Date(dto.transactionDate),
+            name: row.name,
+            description: row.description,
+            reference: row.reference,
+            type: dto.type,
+            amount: new Prisma.Decimal(row.amount),
+            balanceAfter: account.currentBalance,
+            notes: dto.notes,
+          },
+        }));
+      }
+      await this.recalculateAccount(tx, organizationId, dto.bankAccountId);
+      return created;
     });
   }
 
@@ -435,6 +464,7 @@ export class BankingService {
       parsed.push({
         bankAccountId: dto.bankAccountId,
         transactionDate: value('date'),
+        name: value('name') || value('description'),
         description: value('description'),
         reference: value('reference') || undefined,
         type,

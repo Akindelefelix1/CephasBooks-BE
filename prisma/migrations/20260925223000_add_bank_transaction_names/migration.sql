@@ -1,0 +1,2 @@
+ALTER TABLE "BankTransaction"
+ADD COLUMN "name" TEXT NOT NULL DEFAULT '';

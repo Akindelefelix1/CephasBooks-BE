@@ -20,6 +20,7 @@ import { BankingService } from './banking.service.ts';
 import {
   CreateBankAccountDto,
   CreateBankTransactionDto,
+  CreateBankTransactionsDto,
   CreateTransferDto,
   ImportTransactionsDto,
   ReconcileTransactionDto,
@@ -81,6 +82,12 @@ export class BankingController {
     @Body() dto: CreateBankTransactionDto,
   ) {
     return this.banking.createTransaction(u.organizationId, dto);
+  }
+  @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT) @Post('transactions/bulk') createTransactions(
+    @CurrentUser() u: AuthUser,
+    @Body() dto: CreateBankTransactionsDto,
+  ) {
+    return this.banking.createTransactions(u.organizationId, dto);
   }
   @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT) @Post('transactions/import') importTransactions(
     @CurrentUser() u: AuthUser,

@@ -2,6 +2,8 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { BankAccountType, BankTransactionType, ReconciliationStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
+  ArrayMinSize,
+  IsArray,
   IsBoolean,
   IsDateString,
   IsEnum,
@@ -12,6 +14,7 @@ import {
   Length,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator';
 
 export class CreateBankAccountDto {
@@ -40,6 +43,7 @@ export class CreateBankTransactionDto {
   @ApiPropertyOptional() @IsOptional() @IsUUID() branchId?: string;
   @ApiProperty() @IsUUID() bankAccountId!: string;
   @ApiProperty() @IsDateString() transactionDate!: string;
+  @ApiProperty() @IsString() @MaxLength(160) name!: string;
   @ApiProperty() @IsString() @MaxLength(240) description!: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(100) reference?: string;
   @ApiProperty({ enum: BankTransactionType })
@@ -47,6 +51,15 @@ export class CreateBankTransactionDto {
   type!: BankTransactionType;
   @ApiProperty() @Type(() => Number) @IsNumber() @Min(0.01) amount!: number;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(1000) notes?: string;
+}
+export class CreateBankTransactionsDto {
+  @ApiProperty() @IsUUID() bankAccountId!: string;
+  @ApiProperty() @IsDateString() transactionDate!: string;
+  @ApiProperty({ enum: BankTransactionType }) @IsEnum(BankTransactionType) type!: BankTransactionType;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(1000) notes?: string;
+  @ApiProperty({ type: [CreateBankTransactionDto] })
+  @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => CreateBankTransactionDto)
+  transactions!: Array<Pick<CreateBankTransactionDto, 'name' | 'description' | 'reference' | 'amount'>>;
 }
 export class ReconcileTransactionDto {
   @ApiProperty({ enum: ReconciliationStatus })

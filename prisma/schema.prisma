@@ -905,6 +905,7 @@ model BankTransaction {
   branchId             String?              @db.Uuid
   bankAccountId        String               @db.Uuid
   transactionDate      DateTime             @db.Date
+  name                 String               @default("")
   description          String
   reference            String?
   type                 BankTransactionType
