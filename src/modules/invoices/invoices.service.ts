@@ -58,6 +58,10 @@ export class InvoicesService {
     );
     const total = items.reduce((sum, item) => sum.add(item.lineTotal), new Prisma.Decimal(0));
     const number = (await this.nextNumber(organizationId)).number;
+    const currency = dto.currency?.toUpperCase() ?? (await this.prisma.organization.findUniqueOrThrow({
+      where: { id: organizationId },
+      select: { baseCurrency: true },
+    })).baseCurrency;
     const invoice = await this.prisma.invoice.create({
       data: {
         organizationId,
@@ -65,7 +69,7 @@ export class InvoicesService {
         customerId: dto.customerId,
         number,
         status: dto.status,
-        currency: dto.currency.toUpperCase(),
+        currency,
         issueDate: new Date(dto.issueDate),
         dueDate: new Date(dto.dueDate),
         notes: dto.notes,

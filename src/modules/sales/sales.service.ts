@@ -78,9 +78,14 @@ export class SalesService {
     if (!customer) throw new BadRequestException('Customer not found');
     if (new Date(d.expiryDate) < new Date(d.issueDate))
       throw new BadRequestException('Expiry date cannot be before issue date');
+    const currency = d.currency?.toUpperCase() ?? (await this.prisma.organization.findUniqueOrThrow({
+      where: { id: org },
+      select: { baseCurrency: true },
+    })).baseCurrency;
     return this.prisma.quotation.create({
       data: {
         ...d,
+        currency,
         organizationId: org,
         issueDate: new Date(d.issueDate),
         expiryDate: new Date(d.expiryDate),

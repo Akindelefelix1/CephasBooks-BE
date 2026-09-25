@@ -10,6 +10,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  IsISO4217CurrencyCode,
   MaxLength,
   Min,
   ValidateNested,
@@ -25,7 +26,7 @@ export class CreateQuotationDto {
   @IsUUID() customerId!: string;
   @IsString() number!: string;
   @IsOptional() @IsEnum(SalesDocumentStatus) status?: SalesDocumentStatus;
-  @IsString() currency = 'NGN';
+  @IsOptional() @IsISO4217CurrencyCode() currency?: string;
   @IsDateString() issueDate!: string;
   @IsDateString() expiryDate!: string;
   @IsArray()

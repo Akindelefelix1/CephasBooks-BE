@@ -6,17 +6,26 @@ import { PurchasesService } from './purchases.service.ts';
 describe('PurchasesService', () => {
   it('calculates request totals on the server and submits for approval', async () => {
     const create = jest.fn().mockImplementation((request) => Promise.resolve(request));
-    const service = new PurchasesService({ purchaseRequest: { create } } as never);
+    const service = new PurchasesService({
+      purchaseRequest: { create },
+      organization: {
+        findUniqueOrThrow: jest.fn().mockResolvedValue({ baseCurrency: 'GHS' }),
+      },
+    } as never);
     await service.createRequest('org-a', {
       number: 'PR-1',
       requestedBy: 'Ada',
       requiredDate: '2026-09-20',
       items: [{ description: 'Paper', quantity: 2, unitPrice: 100, taxRate: 7.5 }],
     });
-    const data = (create.mock.calls[0]?.[0] as { data: { total: Prisma.Decimal; status: string } })
-      .data;
+    const data = (
+      create.mock.calls[0]?.[0] as {
+        data: { total: Prisma.Decimal; status: string; currency: string };
+      }
+    ).data;
     expect(data.total.toString()).toBe('215');
     expect(data.status).toBe('PENDING');
+    expect(data.currency).toBe('GHS');
   });
 
   it('rejects supplier payments above the outstanding bill balance', async () => {

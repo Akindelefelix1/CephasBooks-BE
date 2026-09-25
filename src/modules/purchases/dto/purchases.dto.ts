@@ -5,6 +5,7 @@ import {
   IsDateString,
   IsEmail,
   IsEnum,
+  IsISO4217CurrencyCode,
   IsNumber,
   IsOptional,
   IsString,
@@ -42,7 +43,7 @@ export class RequestDto {
   @IsString() number!: string;
   @IsString() requestedBy!: string;
   @IsDateString() requiredDate!: string;
-  @IsOptional() @IsString() currency = 'NGN';
+  @IsOptional() @IsISO4217CurrencyCode() currency?: string;
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
@@ -57,7 +58,7 @@ export class OrderDto {
   @IsString() number!: string;
   @IsDateString() orderDate!: string;
   @IsDateString() deliveryDate!: string;
-  @IsOptional() @IsString() currency = 'NGN';
+  @IsOptional() @IsISO4217CurrencyCode() currency?: string;
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
@@ -72,7 +73,7 @@ export class BillDto {
   @IsString() number!: string;
   @IsDateString() issueDate!: string;
   @IsDateString() dueDate!: string;
-  @IsOptional() @IsString() currency = 'NGN';
+  @IsOptional() @IsISO4217CurrencyCode() currency?: string;
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
@@ -100,7 +101,7 @@ export class ExpenseDto {
   @IsString() category!: string;
   @Type(() => Number) @IsNumber() @Min(0.01) amount!: number;
   @IsOptional() @Type(() => Number) @IsNumber() @Min(0) taxAmount = 0;
-  @IsOptional() @IsString() currency = 'NGN';
+  @IsOptional() @IsISO4217CurrencyCode() currency?: string;
   @IsOptional() @IsString() notes?: string;
 }
 export class RequestStatusDto {

@@ -35,6 +35,14 @@ export class PurchasesService {
     }, new Prisma.Decimal(0));
     return { subtotal, taxTotal: total.sub(subtotal), total };
   }
+  private async currency(org: string, requested?: string) {
+    if (requested) return requested.toUpperCase();
+    const organization = await this.db.organization.findUniqueOrThrow({
+      where: { id: org },
+      select: { baseCurrency: true },
+    });
+    return organization.baseCurrency;
+  }
   private markOverdue(org: string) {
     const today = new Date();
     today.setUTCHours(0, 0, 0, 0);
@@ -153,9 +161,11 @@ export class PurchasesService {
   async createRequest(org: string, d: RequestDto) {
     await assertBranch(this.db, org, d.branchId);
     const { total } = this.totals(d.items);
+    const currency = await this.currency(org, d.currency);
     return this.db.purchaseRequest.create({
       data: {
         ...d,
+        currency,
         organizationId: org,
         status: 'PENDING',
         requiredDate: new Date(d.requiredDate),
@@ -197,10 +207,12 @@ export class PurchasesService {
       if (!r) throw new BadRequestException('Only an approved request can become an order');
     }
     const t = this.totals(d.items);
+    const currency = await this.currency(org, d.currency);
     const bill = await this.db.$transaction(async (tx) => {
       const o = await tx.purchaseOrder.create({
         data: {
           ...d,
+          currency,
           organizationId: org,
           orderDate: new Date(d.orderDate),
           deliveryDate: new Date(d.deliveryDate),
@@ -263,10 +275,12 @@ export class PurchasesService {
       if (!o) throw new BadRequestException('Purchase order is unavailable');
     }
     const t = this.totals(d.items);
+    const currency = await this.currency(org, d.currency);
     return this.db.$transaction(async (tx) => {
       const b = await tx.bill.create({
         data: {
           ...d,
+          currency,
           organizationId: org,
           issueDate: new Date(d.issueDate),
           dueDate: new Date(d.dueDate),
@@ -454,9 +468,11 @@ export class PurchasesService {
   async createExpense(org: string, d: ExpenseDto) {
     await assertBranch(this.db, org, d.branchId);
     if (d.supplierId) await this.supplier(org, d.supplierId);
+    const currency = await this.currency(org, d.currency);
     const expense = await this.db.expense.create({
       data: {
         ...d,
+        currency,
         organizationId: org,
         expenseDate: new Date(d.expenseDate),
         amount: new Prisma.Decimal(d.amount),

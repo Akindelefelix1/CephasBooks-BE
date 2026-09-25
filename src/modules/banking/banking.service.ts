@@ -137,12 +137,16 @@ export class BankingService {
     });
   }
 
-  createAccount(organizationId: string, dto: CreateBankAccountDto) {
+  async createAccount(organizationId: string, dto: CreateBankAccountDto) {
     const openingBalance = new Prisma.Decimal(dto.openingBalance);
+    const currency = dto.currency?.toUpperCase() ?? (await this.prisma.organization.findUniqueOrThrow({
+      where: { id: organizationId },
+      select: { baseCurrency: true },
+    })).baseCurrency;
     return this.prisma.bankAccount.create({
       data: {
         ...dto,
-        currency: (dto.currency ?? 'NGN').toUpperCase(),
+        currency,
         openingBalance,
         currentBalance: openingBalance,
         organizationId,
