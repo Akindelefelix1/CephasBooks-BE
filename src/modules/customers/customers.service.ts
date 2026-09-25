@@ -2,6 +2,7 @@
 import { PrismaService } from '../../database/prisma.service.ts';
 import { CreateCustomerDto } from './dto/create-customer.dto.ts';
 import { UpdateCustomerDto } from './dto/update-customer.dto.ts';
+import { assertBranch } from '../../common/branch-scope.ts';
 
 @Injectable()
 export class CustomersService {
@@ -26,7 +27,8 @@ export class CustomersService {
         meta: { page, limit, total, pages: Math.ceil(total / limit) },
       }));
   }
-  create(organizationId: string, dto: CreateCustomerDto) {
+  async create(organizationId: string, dto: CreateCustomerDto) {
+    await assertBranch(this.prisma, organizationId, dto.branchId);
     return this.prisma.customer.create({ data: { ...dto, organizationId } });
   }
   async get(organizationId: string, id: string) {

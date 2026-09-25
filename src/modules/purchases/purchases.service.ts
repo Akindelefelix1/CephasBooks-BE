@@ -7,6 +7,7 @@ import {
   PurchaseRequestStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.ts';
+import { assertBranch } from '../../common/branch-scope.ts';
 import { WorkflowService } from '../workflow/workflow.service.ts';
 import {
   BillDto,
@@ -95,7 +96,8 @@ export class PurchasesService {
       orderBy: { createdAt: 'desc' },
     });
   }
-  createSupplier(org: string, d: SupplierDto) {
+  async createSupplier(org: string, d: SupplierDto) {
+    await assertBranch(this.db, org, d.branchId);
     return this.db.supplier.create({ data: { ...d, organizationId: org } });
   }
   async updateSupplier(org: string, id: string, d: SupplierDto) {
@@ -148,7 +150,8 @@ export class PurchasesService {
       orderBy: { createdAt: 'desc' },
     });
   }
-  createRequest(org: string, d: RequestDto) {
+  async createRequest(org: string, d: RequestDto) {
+    await assertBranch(this.db, org, d.branchId);
     const { total } = this.totals(d.items);
     return this.db.purchaseRequest.create({
       data: {
@@ -183,6 +186,7 @@ export class PurchasesService {
     });
   }
   async createOrder(org: string, d: OrderDto) {
+    await assertBranch(this.db, org, d.branchId);
     await this.supplier(org, d.supplierId);
     if (new Date(d.deliveryDate) < new Date(d.orderDate))
       throw new BadRequestException('Delivery date cannot be before order date');
@@ -243,6 +247,7 @@ export class PurchasesService {
     });
   }
   async createBill(org: string, d: BillDto) {
+    await assertBranch(this.db, org, d.branchId);
     await this.supplier(org, d.supplierId);
     if (new Date(d.dueDate) < new Date(d.issueDate))
       throw new BadRequestException('Due date cannot be before issue date');
@@ -292,6 +297,7 @@ export class PurchasesService {
     });
     if (!o) throw new BadRequestException('Purchase order is unavailable');
     return this.createBill(org, {
+      branchId: o.branchId ?? undefined,
       supplierId: o.supplierId,
       purchaseOrderId: o.id,
       number: d.number,
@@ -343,6 +349,7 @@ export class PurchasesService {
     });
   }
   async createPayment(org: string, d: SupplierPaymentDto) {
+    await assertBranch(this.db, org, d.branchId);
     return this.db.$transaction(async (tx) => {
       const b = await tx.bill.findFirst({
         where: {
@@ -372,6 +379,7 @@ export class PurchasesService {
         data: {
           ...d,
           organizationId: org,
+          branchId: d.branchId ?? b.branchId,
           supplierId: b.supplierId,
           currency: b.currency,
           paymentDate: new Date(d.paymentDate),
@@ -444,6 +452,7 @@ export class PurchasesService {
     });
   }
   async createExpense(org: string, d: ExpenseDto) {
+    await assertBranch(this.db, org, d.branchId);
     if (d.supplierId) await this.supplier(org, d.supplierId);
     const expense = await this.db.expense.create({
       data: {

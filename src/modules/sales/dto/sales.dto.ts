@@ -21,6 +21,7 @@ export class SalesLineDto {
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsNumber() @Min(0) taxRate = 0;
 }
 export class CreateQuotationDto {
+  @IsOptional() @IsUUID() branchId?: string;
   @IsUUID() customerId!: string;
   @IsString() number!: string;
   @IsOptional() @IsEnum(SalesDocumentStatus) status?: SalesDocumentStatus;
@@ -35,6 +36,7 @@ export class CreateQuotationDto {
   @IsOptional() @IsString() @MaxLength(2000) notes?: string;
 }
 export class PaymentDto {
+  @IsOptional() @IsUUID() branchId?: string;
   @IsUUID() invoiceId!: string;
   @IsString() reference!: string;
   @Type(() => Number) @IsNumber() @Min(0.01) amount!: number;
@@ -43,6 +45,7 @@ export class PaymentDto {
   @IsOptional() @IsString() notes?: string;
 }
 export class CreditNoteDto {
+  @IsOptional() @IsUUID() branchId?: string;
   @IsUUID() invoiceId!: string;
   @IsString() number!: string;
   @Type(() => Number) @IsNumber() @Min(0.01) amount!: number;

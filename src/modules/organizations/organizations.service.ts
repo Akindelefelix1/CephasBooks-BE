@@ -78,7 +78,7 @@ export class OrganizationsService {
     ];
     if (!allowed.includes(section))
       throw new BadRequestException('Unknown organisation settings section');
-    this.validateSection(section, data);
+    await this.validateSection(actor.organizationId, section, data);
     return this.prisma.$transaction(async (tx) => {
       const organization = await tx.organization.findUniqueOrThrow({
         where: { id: actor.organizationId },
@@ -268,6 +268,176 @@ export class OrganizationsService {
     });
   }
 
+  async locationActivity(organizationId: string, type: string, id: string, kind = 'transactions') {
+    const allowedTypes = ['state', 'region', 'branch'];
+    const allowedKinds = ['transactions', 'sales', 'customers', 'purchases', 'invoices'];
+    if (!allowedTypes.includes(type)) throw new BadRequestException('Unknown location level');
+    if (!allowedKinds.includes(kind)) throw new BadRequestException('Unknown activity type');
+
+    const organization = await this.prisma.organization.findUniqueOrThrow({
+      where: { id: organizationId },
+      select: { onboardingData: true },
+    });
+    const root = this.asObject(organization.onboardingData);
+    const admin = this.asObject(root.admin as Prisma.JsonValue);
+    const hierarchy = this.asObject(admin.branches as Prisma.JsonValue);
+    const states = Array.isArray(hierarchy.states)
+      ? (hierarchy.states as Array<Record<string, unknown>>)
+      : [];
+    const regions = Array.isArray(hierarchy.regions)
+      ? (hierarchy.regions as Array<Record<string, unknown>>)
+      : [];
+    const branches = Array.isArray(hierarchy.items)
+      ? (hierarchy.items as Array<Record<string, unknown>>)
+      : [];
+    const exists =
+      type === 'state'
+        ? states.some((item) => item.id === id)
+        : type === 'region'
+          ? regions.some((item) => item.id === id)
+          : branches.some((item) => item.id === id);
+    if (!exists) throw new NotFoundException('Organisation location not found');
+    const regionIds =
+      type === 'state'
+        ? regions.filter((item) => item.stateId === id).map((item) => String(item.id))
+        : type === 'region'
+          ? [id]
+          : [];
+    const branchIds =
+      type === 'branch'
+        ? [id]
+        : branches
+            .filter((item) => regionIds.includes(String(item.regionId)))
+            .map((item) => String(item.id));
+    const where = { organizationId, branchId: { in: branchIds } };
+    let rows: Array<Record<string, unknown>> = [];
+    if (kind === 'transactions') {
+      const data = await this.prisma.bankTransaction.findMany({
+        where,
+        select: {
+          id: true,
+          description: true,
+          amount: true,
+          type: true,
+          transactionDate: true,
+          branchId: true,
+        },
+        orderBy: { transactionDate: 'desc' },
+        take: 100,
+      });
+      rows = data.map((item) => ({
+        ...item,
+        amount: item.amount.toString(),
+        date: item.transactionDate,
+      }));
+    } else if (kind === 'sales') {
+      const data = await this.prisma.posSale.findMany({
+        where,
+        select: {
+          id: true,
+          receiptNumber: true,
+          total: true,
+          status: true,
+          createdAt: true,
+          branchId: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+      });
+      rows = data.map((item) => ({
+        ...item,
+        label: item.receiptNumber,
+        amount: item.total.toString(),
+        date: item.createdAt,
+      }));
+    } else if (kind === 'customers') {
+      const data = await this.prisma.customer.findMany({
+        where,
+        select: {
+          id: true,
+          displayName: true,
+          companyName: true,
+          email: true,
+          isActive: true,
+          createdAt: true,
+          branchId: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+      });
+      rows = data.map((item) => ({ ...item, label: item.displayName, date: item.createdAt }));
+    } else if (kind === 'purchases') {
+      const [orders, expenses] = await Promise.all([
+        this.prisma.purchaseOrder.findMany({
+          where,
+          select: {
+            id: true,
+            number: true,
+            total: true,
+            status: true,
+            orderDate: true,
+            branchId: true,
+          },
+          orderBy: { orderDate: 'desc' },
+          take: 50,
+        }),
+        this.prisma.expense.findMany({
+          where,
+          select: {
+            id: true,
+            reference: true,
+            merchant: true,
+            amount: true,
+            status: true,
+            expenseDate: true,
+            branchId: true,
+          },
+          orderBy: { expenseDate: 'desc' },
+          take: 50,
+        }),
+      ]);
+      rows = [
+        ...orders.map((item) => ({
+          ...item,
+          label: item.number,
+          amount: item.total.toString(),
+          date: item.orderDate,
+          recordType: 'Purchase order',
+        })),
+        ...expenses.map((item) => ({
+          ...item,
+          label: item.reference,
+          amount: item.amount.toString(),
+          date: item.expenseDate,
+          recordType: 'Expense',
+        })),
+      ]
+        .sort((a, b) => new Date(String(b.date)).getTime() - new Date(String(a.date)).getTime())
+        .slice(0, 100);
+    } else {
+      const data = await this.prisma.invoice.findMany({
+        where,
+        select: {
+          id: true,
+          number: true,
+          total: true,
+          status: true,
+          issueDate: true,
+          branchId: true,
+        },
+        orderBy: { issueDate: 'desc' },
+        take: 100,
+      });
+      rows = data.map((item) => ({
+        ...item,
+        label: item.number,
+        amount: item.total.toString(),
+        date: item.issueDate,
+      }));
+    }
+    return { kind, branchIds, total: rows.length, data: rows };
+  }
+
   private async recordActivity(
     tx: Prisma.TransactionClient,
     actor: AuthUser,
@@ -299,7 +469,11 @@ export class OrganizationsService {
     });
   }
 
-  private validateSection(section: string, data: Record<string, unknown>) {
+  private async validateSection(
+    organizationId: string,
+    section: string,
+    data: Record<string, unknown>,
+  ) {
     if (JSON.stringify(data).length > 100_000)
       throw new BadRequestException('Organisation settings payload is too large');
     const items = data.items;
@@ -309,13 +483,92 @@ export class OrganizationsService {
     }
     if (section === 'branches' && Array.isArray(items)) {
       const branches = items.map((item) => item as Record<string, unknown>);
+      const states = Array.isArray(data.states)
+        ? data.states.map((item) => item as Record<string, unknown>)
+        : [];
+      const regions = Array.isArray(data.regions)
+        ? data.regions.map((item) => item as Record<string, unknown>)
+        : [];
+      if (states.length > 100 || regions.length > 500)
+        throw new BadRequestException('Organisation hierarchy is too large');
+      const validId = (value: unknown) =>
+        typeof value === 'string' &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+      const stateIds = states.map((item) => item.id);
+      const regionIds = regions.map((item) => item.id);
+      const hierarchical = states.length > 0 || regions.length > 0;
+      if (hierarchical) {
+        if (
+          states.some(
+            (item) => !validId(item.id) || typeof item.name !== 'string' || !item.name.trim(),
+          )
+        )
+          throw new BadRequestException('Every state requires a valid id and name');
+        if (new Set(stateIds).size !== stateIds.length)
+          throw new ConflictException('State ids must be unique');
+        const stateNames = states.map((item) => String(item.name).trim().toLowerCase());
+        if (new Set(stateNames).size !== stateNames.length)
+          throw new ConflictException('State names must be unique');
+        if (
+          regions.some(
+            (item) =>
+              !validId(item.id) ||
+              !stateIds.includes(item.stateId) ||
+              typeof item.name !== 'string' ||
+              !item.name.trim(),
+          )
+        )
+          throw new BadRequestException('Every region requires a valid state and name');
+        if (new Set(regionIds).size !== regionIds.length)
+          throw new ConflictException('Region ids must be unique');
+        const regionKeys = regions.map(
+          (item) => `${String(item.stateId)}:${String(item.name).trim().toLowerCase()}`,
+        );
+        if (new Set(regionKeys).size !== regionKeys.length)
+          throw new ConflictException('Region names must be unique within a state');
+        if (branches.some((item) => !validId(item.id) || !regionIds.includes(item.regionId)))
+          throw new BadRequestException('Every branch requires a valid region');
+      }
       const names = branches.map((item) => (typeof item.name === 'string' ? item.name.trim() : ''));
       if (names.some((name) => !name))
         throw new BadRequestException('Every branch requires a name');
       if (branches.some((item) => typeof item.address !== 'string' || !item.address.trim()))
         throw new BadRequestException('Every branch requires an address');
+      if (
+        branches.some(
+          (item) =>
+            item.status !== undefined &&
+            (typeof item.status !== 'string' || !['Active', 'Inactive'].includes(item.status)),
+        )
+      )
+        throw new BadRequestException('Branch status must be Active or Inactive');
       if (new Set(names.map((name) => name.toLowerCase())).size !== names.length)
         throw new ConflictException('Branch names must be unique');
+      const managerIds: unknown[] = [];
+      for (const item of [...states, ...regions, ...branches]) {
+        if (Array.isArray(item.managerIds)) {
+          for (const managerId of item.managerIds as unknown[]) managerIds.push(managerId);
+        }
+      }
+      if (
+        [...states, ...regions, ...branches].some(
+          (item) => item.managerIds !== undefined && !Array.isArray(item.managerIds),
+        )
+      )
+        throw new BadRequestException('Manager assignments must be an array');
+      if (managerIds.some((id) => !validId(id)))
+        throw new BadRequestException('Manager assignments contain an invalid id');
+      if (managerIds.length) {
+        const validManagers = await this.prisma.membership.count({
+          where: {
+            organizationId,
+            id: { in: [...new Set(managerIds as string[])] },
+            user: { isActive: true },
+          },
+        });
+        if (validManagers !== new Set(managerIds).size)
+          throw new BadRequestException('Managers must be active members of this organisation');
+      }
     }
     if (section === 'currencies' && Array.isArray(items)) {
       const currencies = items.map((item) => item as Record<string, unknown>);

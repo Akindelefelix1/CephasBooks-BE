@@ -1,8 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsOptional, IsString, MaxLength, IsNumber, Min } from 'class-validator';
+import { IsEmail, IsOptional, IsString, MaxLength, IsNumber, Min, IsUUID } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreateCustomerDto {
+  @ApiPropertyOptional() @IsOptional() @IsUUID() branchId?: string;
   @ApiProperty() @IsString() @MaxLength(160) displayName!: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(160) companyName?: string;
   @ApiPropertyOptional() @IsOptional() @IsEmail() @MaxLength(254) email?: string;

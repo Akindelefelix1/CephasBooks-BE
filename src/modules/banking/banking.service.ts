@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { BankTransactionType, Prisma, ReconciliationStatus } from '@prisma/client';
 import { createHash, randomUUID } from 'node:crypto';
 import { PrismaService } from '../../database/prisma.service.ts';
+import { assertBranch } from '../../common/branch-scope.ts';
 import {
   CreateBankAccountDto,
   CreateBankTransactionDto,
@@ -217,6 +218,7 @@ export class BankingService {
   }
 
   async createTransaction(organizationId: string, dto: CreateBankTransactionDto) {
+    await assertBranch(this.prisma, organizationId, dto.branchId);
     const account = await this.account(organizationId, dto.bankAccountId);
     if (!account.isActive) throw new BadRequestException('Bank account is archived');
     const amount = new Prisma.Decimal(dto.amount);
@@ -224,6 +226,7 @@ export class BankingService {
       const transaction = await tx.bankTransaction.create({
         data: {
           organizationId,
+          branchId: dto.branchId,
           bankAccountId: dto.bankAccountId,
           transactionDate: new Date(dto.transactionDate),
           description: dto.description,

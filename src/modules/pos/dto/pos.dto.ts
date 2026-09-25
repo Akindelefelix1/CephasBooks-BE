@@ -1,5 +1,19 @@
 import { Type } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsEnum, IsOptional, IsString, IsUUID, MaxLength, Min, IsDateString, IsInt, Max, IsNumber, ValidateNested } from 'class-validator';
+import {
+  ArrayMinSize,
+  IsArray,
+  IsEnum,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+  Min,
+  IsDateString,
+  IsInt,
+  Max,
+  IsNumber,
+  ValidateNested,
+} from 'class-validator';
 import { PosPaymentMethod } from '@prisma/client';
 
 export class PosLineDto {
@@ -13,10 +27,19 @@ export class PosPaymentDto {
   @IsOptional() @IsString() @MaxLength(128) reference?: string;
 }
 export class CompletePosSaleDto {
+  @IsOptional() @IsUUID() branchId?: string;
   @IsUUID() registerId!: string;
   @IsOptional() @IsUUID() customerId?: string;
-  @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => PosLineDto) items!: PosLineDto[];
-  @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => PosPaymentDto) payments!: PosPaymentDto[];
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => PosLineDto)
+  items!: PosLineDto[];
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => PosPaymentDto)
+  payments!: PosPaymentDto[];
   @IsOptional() @IsString() @MaxLength(128) idempotencyKey?: string;
 }
 export class ListPosSalesDto {
@@ -45,4 +68,6 @@ export class ReturnPosSaleDto {
   @Type(() => Number) @IsNumber() @Min(0.0001) quantity!: number;
   @IsString() @MaxLength(1000) reason!: string;
 }
-export class VoidPosSaleDto { @IsString() @MaxLength(1000) reason!: string; }
+export class VoidPosSaleDto {
+  @IsString() @MaxLength(1000) reason!: string;
+}

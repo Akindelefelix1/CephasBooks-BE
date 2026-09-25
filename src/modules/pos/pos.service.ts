@@ -1,12 +1,20 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.ts';
+import { assertBranch } from '../../common/branch-scope.ts';
 @Injectable()
 export class PosService {
   constructor(private readonly db: PrismaService) {}
   async list(
     org: string,
-    query: { page?: number; limit?: number; from?: string; to?: string; customerId?: string; search?: string },
+    query: {
+      page?: number;
+      limit?: number;
+      from?: string;
+      to?: string;
+      customerId?: string;
+      search?: string;
+    },
   ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
@@ -42,7 +50,10 @@ export class PosService {
       }),
       this.db.posSale.count({ where }),
     ]);
-    return { data, meta: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) } };
+    return {
+      data,
+      meta: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
+    };
   }
   registers(org: string) {
     return this.db.posRegister.findMany({
@@ -120,6 +131,7 @@ export class PosService {
     role: string,
     data: {
       registerId: string;
+      branchId?: string;
       idempotencyKey?: string;
       customerId?: string;
       items: Array<{ productId: string; quantity: number; discount?: number }>;
@@ -130,6 +142,7 @@ export class PosService {
       }>;
     },
   ) {
+    await assertBranch(this.db, org, data.branchId);
     if (!data.items?.length || !data.payments?.length)
       throw new BadRequestException('Items and payment are required');
     return this.db.$transaction(async (tx) => {
@@ -244,6 +257,7 @@ export class PosService {
       const sale = await tx.posSale.create({
         data: {
           organizationId: org,
+          branchId: data.branchId,
           customerId: data.customerId || null,
           registerId: shift.registerId,
           shiftId: shift.id,

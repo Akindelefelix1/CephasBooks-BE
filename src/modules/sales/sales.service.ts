@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { Prisma, SalesDocumentStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.ts';
 import { CreditNoteDto, CreateQuotationDto, PaymentDto } from './dto/sales.dto.ts';
+import { assertBranch } from '../../common/branch-scope.ts';
 @Injectable()
 export class SalesService {
   constructor(private readonly prisma: PrismaService) {}
@@ -69,6 +70,7 @@ export class SalesService {
     });
   }
   async createQuotation(org: string, d: CreateQuotationDto) {
+    await assertBranch(this.prisma, org, d.branchId);
     if (!d.items.length) throw new BadRequestException('At least one line item is required');
     const customer = await this.prisma.customer.findFirst({
       where: { id: d.customerId, organizationId: org, isActive: true },
@@ -134,6 +136,7 @@ export class SalesService {
       const invoice = await tx.invoice.create({
         data: {
           organizationId: org,
+          branchId: quote.branchId,
           customerId: quote.customerId,
           number: `INV-${Date.now()}`,
           status: 'DRAFT',
@@ -178,6 +181,7 @@ export class SalesService {
     });
   }
   async recordPayment(org: string, d: PaymentDto) {
+    await assertBranch(this.prisma, org, d.branchId);
     return this.prisma.$transaction(async (tx) => {
       const inv = await tx.invoice.findFirst({
         where: { id: d.invoiceId, organizationId: org, status: { not: 'VOID' } },
@@ -191,6 +195,7 @@ export class SalesService {
         data: {
           ...d,
           organizationId: org,
+          branchId: d.branchId ?? inv.branchId,
           customerId: inv.customerId,
           currency: inv.currency,
           paymentDate: new Date(d.paymentDate),
@@ -246,6 +251,7 @@ export class SalesService {
     });
   }
   async createCreditNote(org: string, d: CreditNoteDto) {
+    await assertBranch(this.prisma, org, d.branchId);
     return this.prisma.$transaction(async (tx) => {
       const inv = await tx.invoice.findFirst({
         where: { id: d.invoiceId, organizationId: org, status: { not: 'VOID' } },
@@ -258,6 +264,7 @@ export class SalesService {
         data: {
           ...d,
           organizationId: org,
+          branchId: d.branchId ?? inv.branchId,
           customerId: inv.customerId,
           currency: inv.currency,
           issueDate: new Date(d.issueDate),

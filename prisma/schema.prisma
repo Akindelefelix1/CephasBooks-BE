@@ -439,6 +439,7 @@ model Product {
 model PosSale {
   id             String        @id @default(uuid()) @db.Uuid
   organizationId String        @db.Uuid
+  branchId       String?       @db.Uuid
   customerId     String?       @db.Uuid
   receiptNumber  String
   registerId     String?       @db.Uuid
@@ -467,6 +468,7 @@ model PosSale {
   @@unique([organizationId, receiptNumber])
   @@unique([organizationId, idempotencyKey])
   @@index([organizationId, createdAt])
+  @@index([organizationId, branchId])
 }
 
 model PosSaleItem {
@@ -698,6 +700,7 @@ model Session {
 model Customer {
   id             String            @id @default(uuid()) @db.Uuid
   organizationId String            @db.Uuid
+  branchId       String?           @db.Uuid
   displayName    String
   companyName    String?
   email          String?
@@ -718,11 +721,13 @@ model Customer {
 
   @@unique([organizationId, email])
   @@index([organizationId, displayName])
+  @@index([organizationId, branchId])
 }
 
 model Invoice {
   id             String            @id @default(uuid()) @db.Uuid
   organizationId String            @db.Uuid
+  branchId       String?           @db.Uuid
   customerId     String            @db.Uuid
   number         String
   status         InvoiceStatus     @default(DRAFT)
@@ -745,12 +750,14 @@ model Invoice {
 
   @@unique([organizationId, number])
   @@index([organizationId, status])
+  @@index([organizationId, branchId])
   @@index([customerId])
 }
 
 model Quotation {
   id                 String              @id @default(uuid()) @db.Uuid
   organizationId     String              @db.Uuid
+  branchId           String?             @db.Uuid
   customerId         String              @db.Uuid
   number             String
   status             SalesDocumentStatus @default(DRAFT)
@@ -770,11 +777,13 @@ model Quotation {
 
   @@unique([organizationId, number])
   @@index([organizationId, status])
+  @@index([organizationId, branchId])
 }
 
 model PaymentReceived {
   id             String       @id @default(uuid()) @db.Uuid
   organizationId String       @db.Uuid
+  branchId       String?      @db.Uuid
   customerId     String       @db.Uuid
   invoiceId      String       @db.Uuid
   reference      String
@@ -790,11 +799,13 @@ model PaymentReceived {
 
   @@unique([organizationId, reference])
   @@index([organizationId, paymentDate])
+  @@index([organizationId, branchId])
 }
 
 model CreditNote {
   id             String       @id @default(uuid()) @db.Uuid
   organizationId String       @db.Uuid
+  branchId       String?      @db.Uuid
   customerId     String       @db.Uuid
   invoiceId      String       @db.Uuid
   number         String
@@ -810,6 +821,7 @@ model CreditNote {
 
   @@unique([organizationId, number])
   @@index([organizationId, issueDate])
+  @@index([organizationId, branchId])
 }
 
 model InvoiceItem {
@@ -865,6 +877,7 @@ model BankAccount {
 model BankTransaction {
   id                   String               @id @default(uuid()) @db.Uuid
   organizationId       String               @db.Uuid
+  branchId             String?              @db.Uuid
   bankAccountId        String               @db.Uuid
   transactionDate      DateTime             @db.Date
   description          String
@@ -887,6 +900,7 @@ model BankTransaction {
 
   @@unique([organizationId, bankAccountId, importFingerprint])
   @@index([organizationId, transactionDate])
+  @@index([organizationId, branchId])
   @@index([bankAccountId, reconciliationStatus])
   @@index([transferGroupId])
   @@index([organizationId, sourceType, sourceId])
@@ -895,6 +909,7 @@ model BankTransaction {
 model Supplier {
   id             String            @id @default(uuid()) @db.Uuid
   organizationId String            @db.Uuid
+  branchId       String?           @db.Uuid
   displayName    String
   companyName    String?
   email          String?
@@ -915,11 +930,13 @@ model Supplier {
 
   @@unique([organizationId, email])
   @@index([organizationId, displayName])
+  @@index([organizationId, branchId])
 }
 
 model PurchaseRequest {
   id             String                @id @default(uuid()) @db.Uuid
   organizationId String                @db.Uuid
+  branchId       String?               @db.Uuid
   number         String
   requestedBy    String
   requiredDate   DateTime              @db.Date
@@ -935,11 +952,13 @@ model PurchaseRequest {
 
   @@unique([organizationId, number])
   @@index([organizationId, status])
+  @@index([organizationId, branchId])
 }
 
 model PurchaseOrder {
   id             String              @id @default(uuid()) @db.Uuid
   organizationId String              @db.Uuid
+  branchId       String?             @db.Uuid
   supplierId     String              @db.Uuid
   requestId      String?             @unique @db.Uuid
   number         String
@@ -961,11 +980,13 @@ model PurchaseOrder {
 
   @@unique([organizationId, number])
   @@index([organizationId, status])
+  @@index([organizationId, branchId])
 }
 
 model Bill {
   id              String            @id @default(uuid()) @db.Uuid
   organizationId  String            @db.Uuid
+  branchId        String?           @db.Uuid
   supplierId      String            @db.Uuid
   purchaseOrderId String?           @db.Uuid
   number          String
@@ -988,11 +1009,13 @@ model Bill {
 
   @@unique([organizationId, number])
   @@index([organizationId, status, dueDate])
+  @@index([organizationId, branchId])
 }
 
 model SupplierPayment {
   id             String       @id @default(uuid()) @db.Uuid
   organizationId String       @db.Uuid
+  branchId       String?      @db.Uuid
   supplierId     String       @db.Uuid
   billId         String       @db.Uuid
   bankAccountId  String?      @db.Uuid
@@ -1010,11 +1033,13 @@ model SupplierPayment {
 
   @@unique([organizationId, reference])
   @@index([organizationId, paymentDate])
+  @@index([organizationId, branchId])
 }
 
 model Expense {
   id             String        @id @default(uuid()) @db.Uuid
   organizationId String        @db.Uuid
+  branchId       String?       @db.Uuid
   supplierId     String?       @db.Uuid
   bankAccountId  String?       @db.Uuid
   reference      String
@@ -1033,6 +1058,7 @@ model Expense {
 
   @@unique([organizationId, reference])
   @@index([organizationId, status, expenseDate])
+  @@index([organizationId, branchId])
 }
 
 model LedgerAccount {

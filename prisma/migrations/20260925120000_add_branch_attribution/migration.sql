@@ -1,0 +1,27 @@
+ALTER TABLE "PosSale" ADD COLUMN "branchId" UUID;
+ALTER TABLE "Customer" ADD COLUMN "branchId" UUID;
+ALTER TABLE "Invoice" ADD COLUMN "branchId" UUID;
+ALTER TABLE "Quotation" ADD COLUMN "branchId" UUID;
+ALTER TABLE "PaymentReceived" ADD COLUMN "branchId" UUID;
+ALTER TABLE "CreditNote" ADD COLUMN "branchId" UUID;
+ALTER TABLE "BankTransaction" ADD COLUMN "branchId" UUID;
+ALTER TABLE "Supplier" ADD COLUMN "branchId" UUID;
+ALTER TABLE "PurchaseRequest" ADD COLUMN "branchId" UUID;
+ALTER TABLE "PurchaseOrder" ADD COLUMN "branchId" UUID;
+ALTER TABLE "Bill" ADD COLUMN "branchId" UUID;
+ALTER TABLE "SupplierPayment" ADD COLUMN "branchId" UUID;
+ALTER TABLE "Expense" ADD COLUMN "branchId" UUID;
+
+CREATE INDEX "PosSale_organizationId_branchId_idx" ON "PosSale"("organizationId", "branchId");
+CREATE INDEX "Customer_organizationId_branchId_idx" ON "Customer"("organizationId", "branchId");
+CREATE INDEX "Invoice_organizationId_branchId_idx" ON "Invoice"("organizationId", "branchId");
+CREATE INDEX "Quotation_organizationId_branchId_idx" ON "Quotation"("organizationId", "branchId");
+CREATE INDEX "PaymentReceived_organizationId_branchId_idx" ON "PaymentReceived"("organizationId", "branchId");
+CREATE INDEX "CreditNote_organizationId_branchId_idx" ON "CreditNote"("organizationId", "branchId");
+CREATE INDEX "BankTransaction_organizationId_branchId_idx" ON "BankTransaction"("organizationId", "branchId");
+CREATE INDEX "Supplier_organizationId_branchId_idx" ON "Supplier"("organizationId", "branchId");
+CREATE INDEX "PurchaseRequest_organizationId_branchId_idx" ON "PurchaseRequest"("organizationId", "branchId");
+CREATE INDEX "PurchaseOrder_organizationId_branchId_idx" ON "PurchaseOrder"("organizationId", "branchId");
+CREATE INDEX "Bill_organizationId_branchId_idx" ON "Bill"("organizationId", "branchId");
+CREATE INDEX "SupplierPayment_organizationId_branchId_idx" ON "SupplierPayment"("organizationId", "branchId");
+CREATE INDEX "Expense_organizationId_branchId_idx" ON "Expense"("organizationId", "branchId");

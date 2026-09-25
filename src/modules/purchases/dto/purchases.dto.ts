@@ -26,6 +26,7 @@ export class PurchaseLineDto {
   @IsOptional() @Type(() => Number) @IsNumber() @Min(0) taxRate = 0;
 }
 export class SupplierDto {
+  @IsOptional() @IsUUID() branchId?: string;
   @IsString() displayName!: string;
   @IsOptional() @IsString() companyName?: string;
   @IsOptional() @IsEmail() email?: string;
@@ -37,6 +38,7 @@ export class SupplierDto {
   @IsOptional() @IsString() notes?: string;
 }
 export class RequestDto {
+  @IsOptional() @IsUUID() branchId?: string;
   @IsString() number!: string;
   @IsString() requestedBy!: string;
   @IsDateString() requiredDate!: string;
@@ -49,6 +51,7 @@ export class RequestDto {
   @IsOptional() @IsString() notes?: string;
 }
 export class OrderDto {
+  @IsOptional() @IsUUID() branchId?: string;
   @IsUUID() supplierId!: string;
   @IsOptional() @IsUUID() requestId?: string;
   @IsString() number!: string;
@@ -63,6 +66,7 @@ export class OrderDto {
   @IsOptional() @IsString() notes?: string;
 }
 export class BillDto {
+  @IsOptional() @IsUUID() branchId?: string;
   @IsUUID() supplierId!: string;
   @IsOptional() @IsUUID() purchaseOrderId?: string;
   @IsString() number!: string;
@@ -77,6 +81,7 @@ export class BillDto {
   @IsOptional() @IsString() notes?: string;
 }
 export class SupplierPaymentDto {
+  @IsOptional() @IsUUID() branchId?: string;
   @IsUUID() billId!: string;
   @IsOptional() @IsUUID() bankAccountId?: string;
   @IsString() reference!: string;
@@ -86,6 +91,7 @@ export class SupplierPaymentDto {
   @IsOptional() @IsString() notes?: string;
 }
 export class ExpenseDto {
+  @IsOptional() @IsUUID() branchId?: string;
   @IsOptional() @IsUUID() supplierId?: string;
   @IsOptional() @IsUUID() bankAccountId?: string;
   @IsString() reference!: string;

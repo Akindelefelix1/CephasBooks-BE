@@ -79,6 +79,15 @@ export class OrganizationsController {
     return this.organizations.auditLogs(user.organizationId, search);
   }
 
+  @Get('locations/:type/:id/activity') locationActivity(
+    @CurrentUser() user: AuthUser,
+    @Param('type') type: string,
+    @Param('id') id: string,
+    @Query('kind') kind?: string,
+  ) {
+    return this.organizations.locationActivity(user.organizationId, type, id, kind);
+  }
+
   @Get('onboarding')
   getOnboarding(@CurrentUser() user: AuthUser) {
     return this.organizations.getOnboarding(user.organizationId);

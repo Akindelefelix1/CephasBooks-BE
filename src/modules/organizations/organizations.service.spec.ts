@@ -63,6 +63,30 @@ describe('OrganizationsService onboarding', () => {
     expect(transaction).not.toHaveBeenCalled();
   });
 
+  it('rejects regions whose state does not exist', async () => {
+    const transaction = jest.fn();
+    const service = new OrganizationsService({ $transaction: transaction } as never);
+    await expect(
+      service.updateSection(
+        { sub: 'user-a', email: 'owner@example.com', organizationId: 'org-a', role: 'OWNER' },
+        'branches',
+        {
+          states: [{ id: '0f77eb5c-ae97-4ab8-a096-b21099539db6', name: 'Lagos', managerIds: [] }],
+          regions: [
+            {
+              id: 'bd55d6a5-b262-4a92-ab7d-f3237bcd8059',
+              stateId: 'afcf9935-6804-4479-86e0-01e0880ef82d',
+              name: 'West',
+              managerIds: [],
+            },
+          ],
+          items: [],
+        },
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
   it('prevents owner access from being changed', async () => {
     const service = new OrganizationsService({
       membership: {
