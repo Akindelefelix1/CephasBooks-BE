@@ -229,6 +229,7 @@ model User {
   sessions                  Session[]
   auditLogs                 AuditLog[]
   notificationReceipts      NotificationReceipt[]
+  bankTransactionReversals  BankTransaction[] @relation("BankTransactionReversedBy")
 }
 
 model Organization {
@@ -916,10 +917,13 @@ model BankTransaction {
   sourceType           String?
   sourceId             String?              @db.Uuid
   reversedAt           DateTime?
+  reversalReason       String?
+  reversedById         String?              @db.Uuid
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
   organization         Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   bankAccount          BankAccount          @relation(fields: [bankAccountId], references: [id], onDelete: Restrict)
+  reversedBy           User?                @relation("BankTransactionReversedBy", fields: [reversedById], references: [id], onDelete: SetNull)
 
   @@unique([organizationId, bankAccountId, importFingerprint])
   @@index([organizationId, transactionDate])
@@ -927,6 +931,8 @@ model BankTransaction {
   @@index([bankAccountId, reconciliationStatus])
   @@index([transferGroupId])
   @@index([organizationId, sourceType, sourceId])
+  @@index([organizationId, reversedAt])
+  @@index([reversedById])
 }
 
 model Supplier {

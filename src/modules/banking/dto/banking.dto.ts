@@ -80,3 +80,7 @@ export class UpdateBankTransactionDto {
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsNumber() @Min(0.01) amount?: number;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(1000) notes?: string;
 }
+
+export class ReverseBankTransactionDto {
+  @ApiProperty() @IsString() @MaxLength(500) reason!: string;
+}

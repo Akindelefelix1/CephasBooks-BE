@@ -23,6 +23,7 @@ import {
   CreateTransferDto,
   ImportTransactionsDto,
   ReconcileTransactionDto,
+  ReverseBankTransactionDto,
   UpdateBankAccountDto,
   UpdateBankTransactionDto,
 } from './dto/banking.dto.ts';
@@ -72,6 +73,9 @@ export class BankingController {
   ) {
     return this.banking.transactions(u.organizationId, query);
   }
+  @Get('transactions/reversals') reversals(@CurrentUser() u: AuthUser) {
+    return this.banking.reversalHistory(u.organizationId);
+  }
   @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT) @Post('transactions') createTransaction(
     @CurrentUser() u: AuthUser,
     @Body() dto: CreateBankTransactionDto,
@@ -100,8 +104,9 @@ export class BankingController {
   @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT) @Post('transactions/:id/reverse') reverse(
     @CurrentUser() u: AuthUser,
     @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReverseBankTransactionDto,
   ) {
-    return this.banking.reverseTransaction(u.organizationId, id);
+    return this.banking.reverseTransaction(u.organizationId, u.sub, id, dto.reason);
   }
   @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT)
   @Patch('transactions/:id/reconciliation')

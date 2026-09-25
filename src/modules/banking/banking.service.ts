@@ -221,6 +221,18 @@ export class BankingService {
     return { data, meta: { page, limit, total, pages: Math.ceil(total / limit) } };
   }
 
+  reversalHistory(organizationId: string) {
+    return this.prisma.bankTransaction.findMany({
+      where: { organizationId, reversedAt: { not: null } },
+      include: {
+        bankAccount: { select: { id: true, name: true, currency: true } },
+        reversedBy: { select: { id: true, email: true, firstName: true, lastName: true } },
+      },
+      orderBy: { reversedAt: 'desc' },
+      take: 200,
+    });
+  }
+
   async createTransaction(organizationId: string, dto: CreateBankTransactionDto) {
     await assertBranch(this.prisma, organizationId, dto.branchId);
     const account = await this.account(organizationId, dto.bankAccountId);
@@ -269,7 +281,9 @@ export class BankingService {
     });
   }
 
-  async reverseTransaction(organizationId: string, id: string) {
+  async reverseTransaction(organizationId: string, actorId: string, id: string, reason: string) {
+    const normalizedReason = reason.trim();
+    if (!normalizedReason) throw new BadRequestException('A reversal reason is required');
     const existing = await this.prisma.bankTransaction.findFirst({
       where: { id, organizationId, reversedAt: null },
     });
@@ -283,9 +297,13 @@ export class BankingService {
       if (existing.transferGroupId)
         await tx.bankTransaction.updateMany({
           where: { organizationId, transferGroupId: existing.transferGroupId, reversedAt: null },
-          data: { reversedAt },
+          data: { reversedAt, reversedById: actorId, reversalReason: normalizedReason },
         });
-      else await tx.bankTransaction.update({ where: { id }, data: { reversedAt } });
+      else
+        await tx.bankTransaction.update({
+          where: { id },
+          data: { reversedAt, reversedById: actorId, reversalReason: normalizedReason },
+        });
       const accountIds = existing.transferGroupId
         ? (
             await tx.bankTransaction.findMany({
@@ -297,7 +315,7 @@ export class BankingService {
         : [existing.bankAccountId];
       for (const accountId of accountIds)
         await this.recalculateAccount(tx, organizationId, accountId);
-      return { reversed: true };
+      return { reversed: true, reversedAt };
     });
   }
 
