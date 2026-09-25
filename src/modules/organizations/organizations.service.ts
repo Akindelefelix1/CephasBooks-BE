@@ -1,6 +1,11 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { ConflictException, NotFoundException } from '@nestjs/common';
 import type { AuthUser } from '../../common/decorators/current-user.decorator.ts';
 import type {
   InviteOrganizationUserDto,
@@ -9,6 +14,9 @@ import type {
   UpdateOrganizationUserDto,
 } from './dto/update-organization.dto.ts';
 import { PrismaService } from '../../database/prisma.service.ts';
+import { MailService } from '../mail/mail.service.ts';
+import * as argon2 from 'argon2';
+import { randomBytes } from 'node:crypto';
 
 const STEP_ORDER = ['business', 'financial', 'structure', 'tax', 'team'] as const;
 type StepName = (typeof STEP_ORDER)[number];
@@ -42,7 +50,10 @@ const ROLE_PERMISSIONS = [
 
 @Injectable()
 export class OrganizationsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mail?: MailService,
+  ) {}
 
   async admin(organizationId: string) {
     const organization = await this.prisma.organization.findUniqueOrThrow({
@@ -150,6 +161,7 @@ export class OrganizationsService {
             address: true,
             isActive: true,
             verifiedAt: true,
+            mustChangePassword: true,
           },
         },
       },
@@ -167,11 +179,7 @@ export class OrganizationsService {
     });
     if (existing?.memberships.length)
       throw new ConflictException('This user already belongs to the organisation');
-    if (!existing)
-      throw new BadRequestException(
-        'No Cephas Books account exists for this email. Ask the user to register first.',
-      );
-    if (!existing.verifiedAt || !existing.isActive)
+    if (existing && (!existing.verifiedAt || !existing.isActive))
       throw new BadRequestException('The user account must be verified and active first');
     const customRole = dto.customRoleId
       ? await this.prisma.customRole.findFirst({
@@ -179,9 +187,14 @@ export class OrganizationsService {
         })
       : null;
     if (dto.customRoleId && !customRole) throw new BadRequestException('Custom role not found');
-    return this.prisma.$transaction(async (tx) => {
-      if (dto.firstName || dto.lastName || dto.phone || dto.address)
-        await tx.user.update({
+    const temporaryPassword = existing ? null : this.temporaryPassword();
+    const organization = await this.prisma.organization.findUniqueOrThrow({
+      where: { id: actor.organizationId },
+      select: { name: true },
+    });
+    const membership = await this.prisma.$transaction(async (tx) => {
+      const user = existing
+        ? await tx.user.update({
           where: { id: existing.id },
           data: {
             firstName: dto.firstName?.trim() || undefined,
@@ -189,10 +202,22 @@ export class OrganizationsService {
             phone: dto.phone?.trim() || undefined,
             address: dto.address?.trim() || undefined,
           },
+        })
+        : await tx.user.create({
+          data: {
+            email,
+            passwordHash: await argon2.hash(temporaryPassword!),
+            firstName: dto.firstName?.trim() || null,
+            lastName: dto.lastName?.trim() || null,
+            phone: dto.phone?.trim() || null,
+            address: dto.address?.trim() || null,
+            verifiedAt: new Date(),
+            mustChangePassword: true,
+          },
         });
       const membership = await tx.membership.create({
         data: {
-          userId: existing.id,
+          userId: user.id,
           organizationId: actor.organizationId,
           role: customRole?.baseRole ?? dto.role,
           customRoleId: customRole?.id,
@@ -213,6 +238,7 @@ export class OrganizationsService {
               address: true,
               isActive: true,
               verifiedAt: true,
+              mustChangePassword: true,
             },
           },
         },
@@ -228,6 +254,31 @@ export class OrganizationsService {
       );
       return membership;
     });
+    try {
+      await this.mail?.send({
+        to: email,
+        subject: `You have been invited to ${organization.name} on Cephas Books`,
+        html: `<main style="max-width:600px;margin:auto;padding:32px;font-family:Arial,sans-serif;color:#172033"><h1>Welcome to ${this.escapeHtml(organization.name)}</h1><p>${this.escapeHtml(dto.firstName || 'Hello')}, your staff access has been created.</p>${temporaryPassword ? `<p>Sign in with <strong>${this.escapeHtml(email)}</strong> and this temporary password:</p><p style="padding:16px;background:#f1f5f9;border-radius:8px;font-size:18px"><strong>${this.escapeHtml(temporaryPassword)}</strong></p><p>Change this password immediately after signing in.</p>` : '<p>Your existing Cephas Books account now has access to this organisation.</p>'}</main>`,
+      });
+    } catch {
+      // Do not leave an inaccessible staff account behind when credential delivery fails.
+      await this.prisma.$transaction(async (tx) => {
+        await tx.membership.delete({ where: { id: membership.id } });
+        if (temporaryPassword) await tx.user.delete({ where: { id: membership.user.id } });
+      });
+      throw new ServiceUnavailableException(
+        'The invitation email could not be delivered. No staff account was created; please try again.',
+      );
+    }
+    return membership;
+  }
+
+  private temporaryPassword() {
+    return `Cb!${randomBytes(9).toString('base64url')}`;
+  }
+
+  private escapeHtml(value: string) {
+    return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
   }
 
   async updateUser(actor: AuthUser, id: string, dto: UpdateOrganizationUserDto) {

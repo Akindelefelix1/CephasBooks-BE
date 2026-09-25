@@ -8,6 +8,7 @@ import { RefreshDto } from './dto/refresh.dto.ts';
 import { RegisterDto } from './dto/register.dto.ts';
 import { ResendVerificationDto, VerifyEmailDto } from './dto/verify-email.dto.ts';
 import { UpdateProfileDto } from './dto/update-profile.dto.ts';
+import { ChangePasswordDto } from './dto/change-password.dto.ts';
 
 @ApiTags('Authentication')
 @Controller('auth')
@@ -41,5 +42,11 @@ export class AuthController {
     @Body() dto: UpdateProfileDto,
   ) {
     return this.auth.updateProfile(user.sub, user.organizationId, user.role, dto);
+  }
+  @ApiBearerAuth() @UseGuards(AuthGuard('jwt')) @Patch('password') changePassword(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    return this.auth.changePassword(user.sub, dto);
   }
 }

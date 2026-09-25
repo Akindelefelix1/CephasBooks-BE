@@ -217,6 +217,7 @@ model User {
   lastName                  String?
   phone                     String?
   address                   String?
+  mustChangePassword        Boolean      @default(false)
   isActive                  Boolean      @default(true)
   verifiedAt                DateTime?
   verificationCodeHash      String?

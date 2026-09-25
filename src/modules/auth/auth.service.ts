@@ -16,6 +16,7 @@ import { LoginDto } from './dto/login.dto.ts';
 import { RegisterDto } from './dto/register.dto.ts';
 import { VerifyEmailDto } from './dto/verify-email.dto.ts';
 import { UpdateProfileDto } from './dto/update-profile.dto.ts';
+import { ChangePasswordDto } from './dto/change-password.dto.ts';
 
 export interface Tokens {
   accessToken: string;
@@ -92,7 +93,7 @@ export class AuthService {
     const [user, organization] = await Promise.all([
       this.prisma.user.findUniqueOrThrow({
         where: { id: userId },
-        select: { firstName: true, lastName: true, email: true, createdAt: true, isActive: true },
+        select: { firstName: true, lastName: true, email: true, phone: true, address: true, mustChangePassword: true, createdAt: true, isActive: true },
       }),
       this.prisma.organization.findUniqueOrThrow({
         where: { id: organizationId },
@@ -109,13 +110,41 @@ export class AuthService {
         ...(dto.firstName !== undefined ? { firstName: dto.firstName.trim() || null } : {}),
         ...(dto.lastName !== undefined ? { lastName: dto.lastName.trim() || null } : {}),
       },
-      select: { firstName: true, lastName: true, email: true, createdAt: true, isActive: true },
+      select: {
+        firstName: true,
+        lastName: true,
+        email: true,
+        phone: true,
+        address: true,
+        mustChangePassword: true,
+        createdAt: true,
+        isActive: true,
+      },
     });
     const organization = await this.prisma.organization.findUniqueOrThrow({
       where: { id: organizationId },
       select: { name: true, baseCurrency: true, countryCode: true },
     });
     return { ...profile, role, organization };
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordDto) {
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    if (!(await argon2.verify(user.passwordHash, dto.currentPassword)))
+      throw new UnauthorizedException('Current password is incorrect');
+    if (await argon2.verify(user.passwordHash, dto.newPassword))
+      throw new ConflictException('New password must be different from the current password');
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: userId },
+        data: { passwordHash: await argon2.hash(dto.newPassword), mustChangePassword: false },
+      }),
+      this.prisma.session.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
+    return { changed: true };
   }
 
   async verifyEmail(dto: VerifyEmailDto): Promise<Tokens> {
