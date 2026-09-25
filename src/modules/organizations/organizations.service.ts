@@ -4,6 +4,7 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import type { AuthUser } from '../../common/decorators/current-user.decorator.ts';
 import type {
   InviteOrganizationUserDto,
+  CustomRoleDto,
   UpdateOrganizationDto,
   UpdateOrganizationUserDto,
 } from './dto/update-organization.dto.ts';
@@ -18,6 +19,26 @@ const COUNTRY_CODES: Record<string, string> = {
   Kenya: 'KE',
   'South Africa': 'ZA',
 };
+
+const ROLE_PERMISSIONS = [
+  'dashboard.view',
+  'banking.view',
+  'banking.manage',
+  'sales.view',
+  'sales.manage',
+  'purchases.view',
+  'purchases.manage',
+  'accounting.view',
+  'accounting.manage',
+  'inventory.view',
+  'inventory.manage',
+  'reports.view',
+  'reports.export',
+  'approvals.review',
+  'users.view',
+  'users.manage',
+  'settings.manage',
+] as const;
 
 @Injectable()
 export class OrganizationsService {
@@ -116,6 +137,8 @@ export class OrganizationsService {
       select: {
         id: true,
         role: true,
+        customRoleId: true,
+        customRole: true,
         createdAt: true,
         user: {
           select: {
@@ -123,6 +146,8 @@ export class OrganizationsService {
             email: true,
             firstName: true,
             lastName: true,
+            phone: true,
+            address: true,
             isActive: true,
             verifiedAt: true,
           },
@@ -148,16 +173,35 @@ export class OrganizationsService {
       );
     if (!existing.verifiedAt || !existing.isActive)
       throw new BadRequestException('The user account must be verified and active first');
+    const customRole = dto.customRoleId
+      ? await this.prisma.customRole.findFirst({
+          where: { id: dto.customRoleId, organizationId: actor.organizationId },
+        })
+      : null;
+    if (dto.customRoleId && !customRole) throw new BadRequestException('Custom role not found');
     return this.prisma.$transaction(async (tx) => {
+      if (dto.firstName || dto.lastName || dto.phone || dto.address)
+        await tx.user.update({
+          where: { id: existing.id },
+          data: {
+            firstName: dto.firstName?.trim() || undefined,
+            lastName: dto.lastName?.trim() || undefined,
+            phone: dto.phone?.trim() || undefined,
+            address: dto.address?.trim() || undefined,
+          },
+        });
       const membership = await tx.membership.create({
         data: {
           userId: existing.id,
           organizationId: actor.organizationId,
-          role: dto.role,
+          role: customRole?.baseRole ?? dto.role,
+          customRoleId: customRole?.id,
         },
         select: {
           id: true,
           role: true,
+          customRoleId: true,
+          customRole: true,
           createdAt: true,
           user: {
             select: {
@@ -165,6 +209,8 @@ export class OrganizationsService {
               email: true,
               firstName: true,
               lastName: true,
+              phone: true,
+              address: true,
               isActive: true,
               verifiedAt: true,
             },
@@ -194,7 +240,15 @@ export class OrganizationsService {
       throw new BadRequestException('The organisation owner access cannot be changed');
     if (dto.role === 'OWNER')
       throw new BadRequestException('Ownership cannot be assigned from user management');
-    if (!dto.role && typeof dto.isActive !== 'boolean')
+    if (
+      !dto.role &&
+      !dto.customRoleId &&
+      typeof dto.isActive !== 'boolean' &&
+      dto.firstName === undefined &&
+      dto.lastName === undefined &&
+      dto.phone === undefined &&
+      dto.address === undefined
+    )
       throw new BadRequestException('Provide a role or account status to update');
     if (membership.userId === actor.sub && dto.isActive === false)
       throw new BadRequestException('You cannot deactivate your own account');
@@ -208,13 +262,42 @@ export class OrganizationsService {
         );
     }
     return this.prisma.$transaction(async (tx) => {
-      if (dto.role) await tx.membership.update({ where: { id }, data: { role: dto.role } });
+      let customRole = null;
+      if (dto.customRoleId) {
+        customRole = await tx.customRole.findFirst({
+          where: { id: dto.customRoleId, organizationId: actor.organizationId },
+        });
+        if (!customRole) throw new BadRequestException('Custom role not found');
+      }
+      if (dto.role || customRole)
+        await tx.membership.update({
+          where: { id },
+          data: {
+            role: customRole?.baseRole ?? dto.role,
+            customRoleId: customRole?.id ?? (dto.role ? null : undefined),
+          },
+        });
+      if (
+        dto.firstName !== undefined ||
+        dto.lastName !== undefined ||
+        dto.phone !== undefined ||
+        dto.address !== undefined
+      )
+        await tx.user.update({
+          where: { id: membership.userId },
+          data: {
+            firstName: dto.firstName !== undefined ? dto.firstName.trim() || null : undefined,
+            lastName: dto.lastName !== undefined ? dto.lastName.trim() || null : undefined,
+            phone: dto.phone !== undefined ? dto.phone.trim() || null : undefined,
+            address: dto.address !== undefined ? dto.address.trim() || null : undefined,
+          },
+        });
       if (typeof dto.isActive === 'boolean')
         await tx.user.update({
           where: { id: membership.userId },
           data: { isActive: dto.isActive },
         });
-      if (dto.isActive === false)
+      if (dto.isActive === false || dto.role || dto.customRoleId)
         await tx.session.updateMany({
           where: { userId: membership.userId, revokedAt: null },
           data: { revokedAt: new Date() },
@@ -233,6 +316,8 @@ export class OrganizationsService {
         select: {
           id: true,
           role: true,
+          customRoleId: true,
+          customRole: true,
           createdAt: true,
           user: {
             select: {
@@ -240,6 +325,8 @@ export class OrganizationsService {
               email: true,
               firstName: true,
               lastName: true,
+              phone: true,
+              address: true,
               isActive: true,
               verifiedAt: true,
             },
@@ -247,6 +334,69 @@ export class OrganizationsService {
         },
       });
     });
+  }
+
+  roles(organizationId: string) {
+    return this.prisma.customRole.findMany({
+      where: { organizationId },
+      include: { _count: { select: { memberships: true } } },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async createRole(actor: AuthUser, dto: CustomRoleDto) {
+    this.validateRole(dto);
+    return this.prisma.customRole.create({
+      data: { ...dto, name: dto.name.trim(), organizationId: actor.organizationId },
+    });
+  }
+
+  async updateRole(actor: AuthUser, id: string, dto: CustomRoleDto) {
+    this.validateRole(dto);
+    const role = await this.prisma.customRole.findFirst({
+      where: { id, organizationId: actor.organizationId },
+    });
+    if (!role) throw new NotFoundException('Custom role not found');
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.customRole.update({
+        where: { id },
+        data: { ...dto, name: dto.name.trim() },
+      });
+      if (role.baseRole !== dto.baseRole) {
+        const memberships = await tx.membership.findMany({
+          where: { customRoleId: id },
+          select: { userId: true },
+        });
+        await tx.membership.updateMany({
+          where: { customRoleId: id },
+          data: { role: dto.baseRole },
+        });
+        await tx.session.updateMany({
+          where: { userId: { in: memberships.map((item) => item.userId) }, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+      }
+      return updated;
+    });
+  }
+
+  async deleteRole(actor: AuthUser, id: string) {
+    const role = await this.prisma.customRole.findFirst({
+      where: { id, organizationId: actor.organizationId },
+      include: { _count: { select: { memberships: true } } },
+    });
+    if (!role) throw new NotFoundException('Custom role not found');
+    if (role._count.memberships > 0)
+      throw new ConflictException('Reassign users before deleting this role');
+    await this.prisma.customRole.delete({ where: { id } });
+    return { deleted: true };
+  }
+
+  private validateRole(dto: CustomRoleDto) {
+    if (dto.baseRole === 'OWNER')
+      throw new BadRequestException('Custom roles cannot grant owner access');
+    if (dto.permissions.some((permission) => !ROLE_PERMISSIONS.includes(permission as never)))
+      throw new BadRequestException('Custom role contains an unsupported permission');
   }
 
   auditLogs(organizationId: string, search?: string) {

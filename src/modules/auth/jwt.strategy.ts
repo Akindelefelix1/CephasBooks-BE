@@ -21,9 +21,16 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       where: {
         userId_organizationId: { userId: payload.sub, organizationId: payload.organizationId },
       },
-      include: { user: true },
+      include: { user: true, customRole: true },
     });
     if (!membership?.user.isActive) throw new UnauthorizedException();
-    return { ...payload, role: membership.role };
+    return {
+      ...payload,
+      role: membership.role,
+      customRoleId: membership.customRoleId ?? undefined,
+      permissions: membership.customRole
+        ? (membership.customRole.permissions as string[])
+        : undefined,
+    };
   }
 }

@@ -9,6 +9,9 @@ import {
   IsOptional,
   IsObject,
   IsString,
+  IsArray,
+  ArrayUnique,
+  IsUUID,
   MaxLength,
 } from 'class-validator';
 
@@ -25,9 +28,26 @@ export class UpdateOrganizationSectionDto {
 export class InviteOrganizationUserDto {
   @IsEmail() email!: string;
   @IsEnum(Role) role!: Role;
+  @IsOptional() @IsUUID() customRoleId?: string;
+  @IsOptional() @IsString() @MaxLength(80) firstName?: string;
+  @IsOptional() @IsString() @MaxLength(80) lastName?: string;
+  @IsOptional() @IsString() @MaxLength(40) phone?: string;
+  @IsOptional() @IsString() @MaxLength(500) address?: string;
 }
 
 export class UpdateOrganizationUserDto {
   @IsOptional() @IsEnum(Role) role?: Role;
+  @IsOptional() @IsUUID() customRoleId?: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsString() @MaxLength(80) firstName?: string;
+  @IsOptional() @IsString() @MaxLength(80) lastName?: string;
+  @IsOptional() @IsString() @MaxLength(40) phone?: string;
+  @IsOptional() @IsString() @MaxLength(500) address?: string;
+}
+
+export class CustomRoleDto {
+  @IsString() @MaxLength(80) name!: string;
+  @IsOptional() @IsString() @MaxLength(500) description?: string;
+  @IsEnum(Role) baseRole!: Role;
+  @IsArray() @ArrayUnique() @IsString({ each: true }) permissions!: string[];
 }

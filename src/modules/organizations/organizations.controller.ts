@@ -1,6 +1,6 @@
 ﻿import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { Param, Post, Query } from '@nestjs/common';
+import { Delete, Param, Post, Query } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Role } from '@prisma/client';
 import { CurrentUser, type AuthUser } from '../../common/decorators/current-user.decorator.ts';
@@ -16,6 +16,7 @@ import {
 } from './dto/onboarding.dto.ts';
 import {
   InviteOrganizationUserDto,
+  CustomRoleDto,
   UpdateOrganizationDto,
   UpdateOrganizationSectionDto,
   UpdateOrganizationUserDto,
@@ -70,6 +71,32 @@ export class OrganizationsController {
     @Body() dto: UpdateOrganizationUserDto,
   ) {
     return this.organizations.updateUser(user, id, dto);
+  }
+
+  @Roles(Role.OWNER, Role.ADMIN, Role.AUDITOR) @Get('roles') roles(@CurrentUser() user: AuthUser) {
+    return this.organizations.roles(user.organizationId);
+  }
+
+  @Roles(Role.OWNER, Role.ADMIN) @Post('roles') createRole(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: CustomRoleDto,
+  ) {
+    return this.organizations.createRole(user, dto);
+  }
+
+  @Roles(Role.OWNER, Role.ADMIN) @Patch('roles/:id') updateRole(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: CustomRoleDto,
+  ) {
+    return this.organizations.updateRole(user, id, dto);
+  }
+
+  @Roles(Role.OWNER, Role.ADMIN) @Delete('roles/:id') deleteRole(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+  ) {
+    return this.organizations.deleteRole(user, id);
   }
 
   @Roles(Role.OWNER, Role.ADMIN, Role.AUDITOR) @Get('audit-logs') auditLogs(
