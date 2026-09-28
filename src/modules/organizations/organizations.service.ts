@@ -739,7 +739,9 @@ export class OrganizationsService {
     }
     if (section === 'currencies' && Array.isArray(items)) {
       const currencies = items.map((item) => item as Record<string, unknown>);
-      const codes = currencies.map((item) => String(item.code || '').toUpperCase());
+      const currencyCode = (value: unknown) =>
+        (typeof value === 'string' ? value : '').trim().toUpperCase();
+      const codes = currencies.map((item) => currencyCode(item.code));
       if (!currencies.length) throw new BadRequestException('Select at least one currency');
       if (new Set(codes).size !== codes.length)
         throw new ConflictException('Each currency can only be selected once');
@@ -752,8 +754,10 @@ export class OrganizationsService {
         })
       )
         throw new BadRequestException('Every currency must have a positive exchange rate');
-      const defaultCurrency = String(data.defaultCurrency || '').toUpperCase();
-      const selectedDefault = currencies.find((item) => String(item.code).toUpperCase() === defaultCurrency);
+      const defaultCurrency = currencyCode(data.defaultCurrency);
+      const selectedDefault = currencies.find(
+        (item) => currencyCode(item.code) === defaultCurrency,
+      );
       if (!selectedDefault || selectedDefault.active === false)
         throw new BadRequestException('The default currency must be selected and active');
       if (Number(selectedDefault.rate) !== 1)

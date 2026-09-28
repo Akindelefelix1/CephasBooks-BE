@@ -109,6 +109,7 @@ export class SalesService {
         })
       ).baseCurrency;
     const { number: _number, ...quotationData } = d;
+    void _number;
     const number = (await this.nextQuotationNumber(org)).number;
     return this.prisma.quotation.create({
       data: {
@@ -130,6 +131,7 @@ export class SalesService {
     if (row.status === 'CONVERTED')
       throw new BadRequestException('Converted quotation cannot be edited');
     const { number: _number, ...quotationData } = d;
+    void _number;
     return this.prisma.quotation.update({
       where: { id },
       data: {

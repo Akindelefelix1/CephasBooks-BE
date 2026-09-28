@@ -78,6 +78,8 @@ describe('InsightsService', () => {
     expect(String(result.metrics.inventoryValue)).toBe('12');
     expect(db.invoice.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
+        // Jest's asymmetric matcher is intentionally dynamic.
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         where: expect.objectContaining({
           organizationId: 'org-a',
           status: { in: ['SENT', 'PARTIALLY_PAID', 'PAID', 'OVERDUE'] },
@@ -86,7 +88,7 @@ describe('InsightsService', () => {
     );
   });
 
-  it('rejects invalid and reversed saved-report date ranges', async () => {
+  it('rejects invalid and reversed saved-report date ranges', () => {
     const service = new InsightsService({ savedReport: { create: jest.fn() } } as never);
     expect(() =>
       service.createReport('org-a', {

@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { ApprovalStatus, DocumentStatus, WorkflowStatus } from '@prisma/client';
+import { DocumentStatus, WorkflowStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.ts';
 import type {
   ApprovalDecisionDto,

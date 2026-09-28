@@ -258,6 +258,8 @@ export class OperationsService {
       defaultWarehouseId,
       ...productData
     } = d;
+    void _openingQuantity;
+    void _openingWarehouseId;
     if (defaultWarehouseId) {
       const warehouse = await this.db.warehouse.findFirst({
         where: { id: defaultWarehouseId, organizationId: org, isActive: true },

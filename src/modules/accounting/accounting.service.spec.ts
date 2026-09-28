@@ -53,6 +53,8 @@ describe('AccountingService', () => {
     await service.ledger('org-a', {});
     expect(findMany).toHaveBeenCalledWith(
       expect.objectContaining({
+        // Jest's asymmetric matcher is intentionally dynamic.
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         where: expect.objectContaining({ status: { in: ['POSTED', 'REVERSED'] } }),
       }),
     );

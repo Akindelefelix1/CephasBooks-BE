@@ -176,6 +176,8 @@ describe('OperationsService', () => {
     ).resolves.toEqual(movement);
     expect(createMovement).toHaveBeenCalledWith(
       expect.objectContaining({
+        // Jest's asymmetric matcher is intentionally dynamic.
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         data: expect.objectContaining({
           productId: 'product',
           warehouseId: 'warehouse',
@@ -187,6 +189,8 @@ describe('OperationsService', () => {
     );
     expect(createAudit).toHaveBeenCalledWith(
       expect.objectContaining({
+        // Jest's asymmetric matcher is intentionally dynamic.
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         data: expect.objectContaining({ action: 'RESTOCK', actorId: 'user-a' }),
       }),
     );
