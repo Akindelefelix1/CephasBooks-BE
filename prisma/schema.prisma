@@ -466,6 +466,8 @@ model PosSale {
   total              Decimal       @db.Decimal(19, 4)
   paidAmount         Decimal       @default(0) @db.Decimal(19, 4)
   changeAmount       Decimal       @default(0) @db.Decimal(19, 4)
+  customerSignature  String?       @db.Text
+  salesManagerSignature String?    @db.Text
   createdAt          DateTime      @default(now())
   organization       Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   customer           Customer?     @relation(fields: [customerId], references: [id], onDelete: Restrict)

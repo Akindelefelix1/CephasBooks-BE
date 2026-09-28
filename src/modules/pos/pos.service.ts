@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.ts';
 import { assertBranch } from '../../common/branch-scope.ts';
+import type { UpdatePosReceiptSignaturesDto } from './dto/pos.dto.ts';
 @Injectable()
 export class PosService {
   constructor(private readonly db: PrismaService) {}
@@ -60,6 +61,21 @@ export class PosService {
       where: { organizationId: org, isActive: true },
       include: { warehouse: true },
       orderBy: { code: 'asc' },
+    });
+  }
+  async updateReceiptSignatures(org: string, saleId: string, data: UpdatePosReceiptSignaturesDto) {
+    const sale = await this.db.posSale.findFirst({
+      where: { id: saleId, organizationId: org },
+      select: { id: true },
+    });
+    if (!sale) throw new NotFoundException('Sale not found');
+    return this.db.posSale.update({
+      where: { id: sale.id },
+      data: {
+        customerSignature: data.customerSignature ?? null,
+        salesManagerSignature: data.salesManagerSignature ?? null,
+      },
+      include: { items: true, payments: true, customer: true },
     });
   }
   async createRegister(org: string, data: { warehouseId: string; code: string; name: string }) {

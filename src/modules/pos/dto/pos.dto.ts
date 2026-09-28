@@ -12,6 +12,7 @@ import {
   IsInt,
   Max,
   IsNumber,
+  Matches,
   ValidateNested,
 } from 'class-validator';
 import { PosPaymentMethod } from '@prisma/client';
@@ -41,6 +42,19 @@ export class CompletePosSaleDto {
   @Type(() => PosPaymentDto)
   payments!: PosPaymentDto[];
   @IsOptional() @IsString() @MaxLength(128) idempotencyKey?: string;
+}
+export class UpdatePosReceiptSignaturesDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(500000)
+  @Matches(/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/)
+  customerSignature?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500000)
+  @Matches(/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/)
+  salesManagerSignature?: string | null;
 }
 export class ListPosSalesDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) page = 1;
