@@ -1,0 +1,3 @@
+ALTER TABLE "Invoice"
+ADD COLUMN "shippingAmount" DECIMAL(19,4) NOT NULL DEFAULT 0,
+ADD COLUMN "shippingAddress" TEXT;

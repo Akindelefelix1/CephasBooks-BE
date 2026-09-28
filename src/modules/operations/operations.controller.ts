@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -39,6 +40,12 @@ export class OperationsController {
   @Get('products') products(@CurrentUser() u: AuthUser, @Query() q: Record<string, string>) {
     return this.operations.products(u.organizationId, q);
   }
+  @Get('products/:id') productDetails(
+    @CurrentUser() u: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.operations.productDetails(u.organizationId, id);
+  }
   @Get('product-categories') categories(@CurrentUser() u: AuthUser) {
     return this.operations.categories(u.organizationId);
   }
@@ -52,21 +59,27 @@ export class OperationsController {
     @CurrentUser() u: AuthUser,
     @Body() d: ProductDto,
   ) {
-    return this.operations.createProduct(u.organizationId, d);
+    return this.operations.createProduct(u.organizationId, d, u);
   }
   @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT) @Patch('products/:id') updateProduct(
     @CurrentUser() u: AuthUser,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() d: ProductDto,
   ) {
-    return this.operations.updateProduct(u.organizationId, id, d);
+    return this.operations.updateProduct(u.organizationId, id, d, u);
   }
   @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT) @Patch('products/:id/status') productStatus(
     @CurrentUser() u: AuthUser,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() d: ActiveStatusDto,
   ) {
-    return this.operations.productStatus(u.organizationId, id, d.isActive);
+    return this.operations.productStatus(u.organizationId, id, d.isActive, u);
+  }
+  @Roles(Role.OWNER, Role.ADMIN) @Delete('products/:id') deleteProduct(
+    @CurrentUser() u: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.operations.deleteProduct(u.organizationId, id, u);
   }
   @Get('warehouses') warehouses(@CurrentUser() u: AuthUser, @Query() q: Record<string, string>) {
     return this.operations.warehouses(u.organizationId, q);

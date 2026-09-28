@@ -10,11 +10,12 @@ describe('SalesService', () => {
     await expect(
       service.createQuotation('org-a', {
         customerId: 'customer',
-        number: 'QUO-1',
         currency: 'NGN',
         issueDate: '2026-09-15',
         expiryDate: '2026-09-30',
-        items: [{ description: 'Work', quantity: 1, unitPrice: 100, taxRate: 0 }],
+        items: [
+          { name: 'Consulting', description: 'Work', quantity: 1, unitPrice: 100, taxRate: 0 },
+        ],
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(findFirst).toHaveBeenCalledWith({
@@ -26,15 +27,16 @@ describe('SalesService', () => {
     const create = jest.fn().mockImplementation((request) => Promise.resolve(request));
     const service = new SalesService({
       customer: { findFirst: jest.fn().mockResolvedValue({ id: 'customer' }) },
-      quotation: { create },
+      quotation: { create, findMany: jest.fn().mockResolvedValue([]) },
     } as never);
     await service.createQuotation('org-a', {
       customerId: 'customer',
-      number: 'QUO-1',
       currency: 'NGN',
       issueDate: '2026-09-15',
       expiryDate: '2026-09-30',
-      items: [{ description: 'Work', quantity: 2, unitPrice: 100, taxRate: 7.5 }],
+      items: [
+        { name: 'Consulting', description: 'Work', quantity: 2, unitPrice: 100, taxRate: 7.5 },
+      ],
     });
     const data = (
       create.mock.calls[0]?.[0] as {
@@ -44,19 +46,33 @@ describe('SalesService', () => {
     expect(data.subtotal.toString()).toBe('200');
     expect(data.taxTotal.toString()).toBe('15');
     expect(data.total.toString()).toBe('215');
+    expect((data as unknown as { number: string }).number).toBe('QUO-00001');
+  });
+
+  it('increments quotation numbers while ignoring unrelated formats', async () => {
+    const service = new SalesService({
+      quotation: {
+        findMany: jest
+          .fn()
+          .mockResolvedValue([
+            { number: 'QUO-00003' },
+            { number: 'quote-old' },
+            { number: 'QUO-00011' },
+          ]),
+      },
+    } as never);
+    await expect(service.nextQuotationNumber('org-a')).resolves.toEqual({ number: 'QUO-00012' });
   });
 
   it('rejects payments greater than the outstanding invoice balance', async () => {
     const tx = {
       invoice: {
-        findFirst: jest
-          .fn()
-          .mockResolvedValue({
-            id: 'invoice',
-            total: new Prisma.Decimal(100),
-            paidAmount: new Prisma.Decimal(25),
-            creditedAmount: new Prisma.Decimal(0),
-          }),
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'invoice',
+          total: new Prisma.Decimal(100),
+          paidAmount: new Prisma.Decimal(25),
+          creditedAmount: new Prisma.Decimal(0),
+        }),
       },
     };
     const service = new SalesService({

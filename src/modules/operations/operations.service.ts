@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { AdjustmentStatus, Prisma, ProjectStatus } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../database/prisma.service.ts';
+import type { AuthUser } from '../../common/decorators/current-user.decorator.ts';
 import type {
   AdjustmentDto,
   MovementDto,
@@ -91,6 +92,106 @@ export class OperationsService {
     }));
   }
 
+  async productDetails(org: string, id: string) {
+    const product = await this.product(org, id);
+    const [
+      movements,
+      stockRows,
+      adjustments,
+      saleItems,
+      salesAggregate,
+      returnsAggregate,
+      activity,
+    ] = await Promise.all([
+      this.db.stockMovement.findMany({
+        where: { organizationId: org, productId: id },
+        include: { warehouse: { select: { id: true, code: true, name: true } } },
+        orderBy: [{ movementDate: 'desc' }, { createdAt: 'desc' }],
+        take: 100,
+      }),
+      this.db.stockMovement.findMany({
+        where: { organizationId: org, productId: id },
+        select: { productId: true, type: true, quantity: true, unitCost: true },
+      }),
+      this.db.stockAdjustment.findMany({
+        where: { organizationId: org, productId: id },
+        include: { warehouse: { select: { id: true, code: true, name: true } } },
+        orderBy: [{ adjustmentDate: 'desc' }, { createdAt: 'desc' }],
+        take: 100,
+      }),
+      this.db.posSaleItem.findMany({
+        where: { productId: id, sale: { organizationId: org } },
+        include: {
+          sale: {
+            select: {
+              id: true,
+              receiptNumber: true,
+              status: true,
+              currency: true,
+              cashierId: true,
+              createdAt: true,
+            },
+          },
+        },
+        orderBy: { sale: { createdAt: 'desc' } },
+        take: 100,
+      }),
+      this.db.posSaleItem.aggregate({
+        where: {
+          productId: id,
+          sale: { organizationId: org, status: { in: ['COMPLETED', 'REFUNDED'] } },
+        },
+        _sum: { quantity: true, lineTotal: true },
+      }),
+      this.db.posReturn.aggregate({
+        where: { organizationId: org, productId: id },
+        _sum: { quantity: true, amount: true },
+      }),
+      this.db.auditLog.findMany({
+        where: { organizationId: org, entityType: 'Product', entityId: id },
+        include: { actor: { select: { email: true, firstName: true, lastName: true } } },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+      }),
+    ]);
+    const cashierIds = [
+      ...new Set(saleItems.map((item) => item.sale.cashierId).filter(Boolean)),
+    ] as string[];
+    const cashiers = cashierIds.length
+      ? await this.db.user.findMany({
+          where: { id: { in: cashierIds } },
+          select: { id: true, email: true, firstName: true, lastName: true },
+        })
+      : [];
+    const cashierById = new Map(cashiers.map((cashier) => [cashier.id, cashier]));
+    const stockQuantity = this.stockMap(stockRows).get(id) ?? new Prisma.Decimal(0);
+    const grossUnits = salesAggregate._sum.quantity ?? new Prisma.Decimal(0);
+    const grossSales = salesAggregate._sum.lineTotal ?? new Prisma.Decimal(0);
+    const returnedUnits = returnsAggregate._sum.quantity ?? new Prisma.Decimal(0);
+    const returnsValue = returnsAggregate._sum.amount ?? new Prisma.Decimal(0);
+    const created = activity.find((entry) => entry.action === 'CREATE');
+    return {
+      ...product,
+      stockQuantity,
+      stockValue: stockQuantity.mul(product.costPrice),
+      createdBy: created?.actor ?? null,
+      activity,
+      movements,
+      adjustments,
+      salesSummary: {
+        unitsSold: grossUnits.sub(returnedUnits),
+        grossSales,
+        returnedUnits,
+        returnsValue,
+        netSales: grossSales.sub(returnsValue),
+      },
+      sales: saleItems.map((item) => ({
+        ...item,
+        cashier: item.sale.cashierId ? (cashierById.get(item.sale.cashierId) ?? null) : null,
+      })),
+    };
+  }
+
   categories(org: string) {
     return this.db.productCategory.findMany({
       where: { organizationId: org },
@@ -105,7 +206,7 @@ export class OperationsService {
     });
   }
 
-  async createProduct(org: string, d: ProductDto) {
+  async createProduct(org: string, d: ProductDto, actor?: AuthUser) {
     const { openingQuantity = 0, openingWarehouseId, defaultWarehouseId, ...productData } = d;
     const stockWarehouseId = defaultWarehouseId ?? openingWarehouseId;
     if (openingQuantity > 0 && !stockWarehouseId)
@@ -120,6 +221,17 @@ export class OperationsService {
       const product = await tx.product.create({
         data: { ...productData, defaultWarehouseId: stockWarehouseId, organizationId: org },
       });
+      if (actor)
+        await tx.auditLog.create({
+          data: {
+            organizationId: org,
+            actorId: actor.sub,
+            action: 'CREATE',
+            entityType: 'Product',
+            entityId: product.id,
+            metadata: { email: actor.email, sku: product.sku, name: product.name },
+          },
+        });
       if (openingQuantity > 0 && stockWarehouseId)
         await tx.stockMovement.create({
           data: {
@@ -137,7 +249,7 @@ export class OperationsService {
       return product;
     });
   }
-  async updateProduct(org: string, id: string, d: ProductDto) {
+  async updateProduct(org: string, id: string, d: ProductDto, actor?: AuthUser) {
     await this.product(org, id);
     const {
       openingQuantity: _openingQuantity,
@@ -151,12 +263,26 @@ export class OperationsService {
       });
       if (!warehouse) throw new BadRequestException('Selected stock warehouse is unavailable');
     }
-    return this.db.product.update({
-      where: { id },
-      data: { ...productData, defaultWarehouseId: defaultWarehouseId || null },
+    return this.db.$transaction(async (tx) => {
+      const updated = await tx.product.update({
+        where: { id },
+        data: { ...productData, defaultWarehouseId: defaultWarehouseId || null },
+      });
+      if (actor)
+        await tx.auditLog.create({
+          data: {
+            organizationId: org,
+            actorId: actor.sub,
+            action: 'UPDATE',
+            entityType: 'Product',
+            entityId: id,
+            metadata: { email: actor.email },
+          },
+        });
+      return updated;
     });
   }
-  async productStatus(org: string, id: string, isActive: boolean) {
+  async productStatus(org: string, id: string, isActive: boolean, actor?: AuthUser) {
     await this.product(org, id);
     if (!isActive) {
       const movements = await this.db.stockMovement.findMany({
@@ -167,7 +293,50 @@ export class OperationsService {
       if (!available.isZero())
         throw new BadRequestException('An item with stock on hand cannot be archived');
     }
-    return this.db.product.update({ where: { id }, data: { isActive } });
+    return this.db.$transaction(async (tx) => {
+      const updated = await tx.product.update({ where: { id }, data: { isActive } });
+      if (actor)
+        await tx.auditLog.create({
+          data: {
+            organizationId: org,
+            actorId: actor.sub,
+            action: isActive ? 'RESTORE' : 'ARCHIVE',
+            entityType: 'Product',
+            entityId: id,
+            metadata: { email: actor.email },
+          },
+        });
+      return updated;
+    });
+  }
+
+  async deleteProduct(org: string, id: string, actor: AuthUser) {
+    const product = await this.product(org, id);
+    if (product.isActive) throw new BadRequestException('Archive this item before deleting it');
+    const [movements, adjustments, sales, returns] = await Promise.all([
+      this.db.stockMovement.count({ where: { organizationId: org, productId: id } }),
+      this.db.stockAdjustment.count({ where: { organizationId: org, productId: id } }),
+      this.db.posSaleItem.count({ where: { productId: id, sale: { organizationId: org } } }),
+      this.db.posReturn.count({ where: { organizationId: org, productId: id } }),
+    ]);
+    if (movements || adjustments || sales || returns)
+      throw new BadRequestException(
+        'This item has transaction history and cannot be permanently deleted',
+      );
+    await this.db.$transaction(async (tx) => {
+      await tx.auditLog.create({
+        data: {
+          organizationId: org,
+          actorId: actor.sub,
+          action: 'DELETE',
+          entityType: 'Product',
+          entityId: id,
+          metadata: { email: actor.email, sku: product.sku, name: product.name },
+        },
+      });
+      await tx.product.delete({ where: { id } });
+    });
+    return { deleted: true };
   }
 
   warehouses(org: string, q: Record<string, string>) {

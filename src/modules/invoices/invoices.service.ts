@@ -16,7 +16,11 @@ export class InvoicesService {
   list(organizationId: string) {
     return this.prisma.invoice.findMany({
       where: { organizationId },
-      include: { customer: true, items: true },
+      include: {
+        customer: true,
+        items: true,
+        organization: { select: { name: true, countryCode: true } },
+      },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -34,7 +38,11 @@ export class InvoicesService {
   async get(organizationId: string, id: string) {
     const invoice = await this.prisma.invoice.findFirst({
       where: { id, organizationId },
-      include: { customer: true, items: true },
+      include: {
+        customer: true,
+        items: true,
+        organization: { select: { name: true, countryCode: true } },
+      },
     });
     if (!invoice) throw new NotFoundException('Invoice not found');
     return invoice;
@@ -56,12 +64,17 @@ export class InvoicesService {
       (sum, item) => sum.add(new Prisma.Decimal(item.quantity).mul(item.unitPrice)),
       new Prisma.Decimal(0),
     );
-    const total = items.reduce((sum, item) => sum.add(item.lineTotal), new Prisma.Decimal(0));
+    const lineTotal = items.reduce((sum, item) => sum.add(item.lineTotal), new Prisma.Decimal(0));
+    const shippingAmount = new Prisma.Decimal(dto.shippingAmount ?? 0);
     const number = (await this.nextNumber(organizationId)).number;
-    const currency = dto.currency?.toUpperCase() ?? (await this.prisma.organization.findUniqueOrThrow({
-      where: { id: organizationId },
-      select: { baseCurrency: true },
-    })).baseCurrency;
+    const currency =
+      dto.currency?.toUpperCase() ??
+      (
+        await this.prisma.organization.findUniqueOrThrow({
+          where: { id: organizationId },
+          select: { baseCurrency: true },
+        })
+      ).baseCurrency;
     const invoice = await this.prisma.invoice.create({
       data: {
         organizationId,
@@ -73,12 +86,18 @@ export class InvoicesService {
         issueDate: new Date(dto.issueDate),
         dueDate: new Date(dto.dueDate),
         notes: dto.notes,
+        shippingAddress: dto.shippingAddress,
+        shippingAmount,
         subtotal,
-        taxTotal: total.sub(subtotal),
-        total,
+        taxTotal: lineTotal.sub(subtotal),
+        total: lineTotal.add(shippingAmount),
         items: { create: items },
       },
-      include: { customer: true, items: true },
+      include: {
+        customer: true,
+        items: true,
+        organization: { select: { name: true, countryCode: true } },
+      },
     });
     await this.workflows?.executeEvent(organizationId, 'INVOICE_CREATED', {
       entityType: 'INVOICE',
@@ -107,7 +126,7 @@ export class InvoicesService {
     await this.mail?.send({
       to: invoice.customer.email,
       subject: `Invoice ${invoice.number} from ${invoice.organization.name}`,
-      html: `<main style="max-width:680px;margin:auto;padding:32px;font-family:Arial,sans-serif;color:#3d3025;background:#f8f1e2"><h1 style="letter-spacing:2px;margin:0">INVOICE</h1><p>${escapeHtml(invoice.organization.name)}</p><p><strong>Invoice no.</strong> ${escapeHtml(invoice.number)}<br><strong>Due date:</strong> ${invoice.dueDate.toLocaleDateString('en-NG')}</p><p><strong>Bill to:</strong> ${escapeHtml(invoice.customer.displayName)}</p><table width="100%" cellspacing="0" cellpadding="10" style="border-collapse:collapse;background:#fff"><thead style="background:#5b432e;color:white"><tr><th align="left">Description</th><th>Qty</th><th align="right">Unit price</th><th align="right">Amount</th></tr></thead><tbody>${rows}</tbody></table><p style="text-align:right;font-size:18px"><strong>Total: ${money.format(Number(invoice.total))}</strong></p><p>Thank you for your business.</p></main>`,
+      html: `<main style="max-width:680px;margin:auto;padding:32px;font-family:Arial,sans-serif;color:#20242c;border-top:8px solid #ff8500"><h1 style="margin:0">Invoice</h1><p>${escapeHtml(invoice.organization.name)}</p><p><strong>Invoice no.</strong> ${escapeHtml(invoice.number)}<br><strong>Due date:</strong> ${invoice.dueDate.toLocaleDateString('en-NG')}</p><p><strong>Bill to:</strong> ${escapeHtml(invoice.customer.displayName)}${invoice.shippingAddress ? `<br><strong>Ship to:</strong> ${escapeHtml(invoice.shippingAddress)}` : ''}</p><table width="100%" cellspacing="0" cellpadding="10" style="border-collapse:collapse;background:#fff"><thead style="background:#f3f4f6"><tr><th align="left">Description</th><th>Qty</th><th align="right">Unit price</th><th align="right">Amount</th></tr></thead><tbody>${rows}</tbody></table><p style="text-align:right">Shipping: ${money.format(Number(invoice.shippingAmount))}</p><p style="text-align:right;font-size:18px"><strong>Total: ${money.format(Number(invoice.total))}</strong></p><p>${escapeHtml(invoice.notes || 'Thank you for your business.')}</p></main>`,
     });
     if (invoice.status === 'DRAFT')
       await this.prisma.invoice.update({ where: { id }, data: { status: 'SENT' } });

@@ -88,6 +88,46 @@ describe('OperationsService', () => {
     expect(update).not.toHaveBeenCalled();
   });
 
+  it('requires an archived product before permanent deletion', async () => {
+    const remove = jest.fn();
+    const service = new OperationsService({
+      product: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'product', isActive: true }),
+        delete: remove,
+      },
+    } as never);
+    await expect(
+      service.deleteProduct('org-a', 'product', {
+        sub: 'user-a',
+        email: 'owner@example.com',
+        organizationId: 'org-a',
+        role: 'OWNER',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it('protects archived products that have transaction history from deletion', async () => {
+    const transaction = jest.fn();
+    const service = new OperationsService({
+      product: { findFirst: jest.fn().mockResolvedValue({ id: 'product', isActive: false }) },
+      stockMovement: { count: jest.fn().mockResolvedValue(1) },
+      stockAdjustment: { count: jest.fn().mockResolvedValue(0) },
+      posSaleItem: { count: jest.fn().mockResolvedValue(0) },
+      posReturn: { count: jest.fn().mockResolvedValue(0) },
+      $transaction: transaction,
+    } as never);
+    await expect(
+      service.deleteProduct('org-a', 'product', {
+        sub: 'user-a',
+        email: 'owner@example.com',
+        organizationId: 'org-a',
+        role: 'OWNER',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
   it('only permits approval or void as draft adjustment transitions', async () => {
     const service = new OperationsService({
       stockAdjustment: {

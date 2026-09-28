@@ -33,6 +33,13 @@ export class CreateInvoiceDto {
   @ApiProperty() @IsDateString() issueDate!: string;
   @ApiProperty() @IsDateString() dueDate!: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(2000) notes?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(1000) shippingAddress?: string;
+  @ApiPropertyOptional({ default: 0 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 4 })
+  @Min(0)
+  shippingAmount = 0;
   @ApiProperty({ type: [InvoiceItemDto] })
   @IsArray()
   @ArrayMinSize(1)

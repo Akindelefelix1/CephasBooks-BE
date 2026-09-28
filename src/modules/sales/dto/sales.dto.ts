@@ -25,7 +25,7 @@ export class SalesLineDto {
 export class CreateQuotationDto {
   @IsOptional() @IsUUID() branchId?: string;
   @IsUUID() customerId!: string;
-  @IsString() number!: string;
+  @IsOptional() @IsString() number?: string;
   @IsOptional() @IsEnum(SalesDocumentStatus) status?: SalesDocumentStatus;
   @IsOptional() @IsISO4217CurrencyCode() currency?: string;
   @IsDateString() issueDate!: string;

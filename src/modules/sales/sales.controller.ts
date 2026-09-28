@@ -26,6 +26,9 @@ export class SalesController {
   @Get('quotations') quotations(@CurrentUser() u: AuthUser, @Query() q: Record<string, string>) {
     return this.sales.quotations(u.organizationId, q);
   }
+  @Get('quotations/next-number') nextQuotationNumber(@CurrentUser() u: AuthUser) {
+    return this.sales.nextQuotationNumber(u.organizationId);
+  }
   @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT) @Post('quotations') createQuotation(
     @CurrentUser() u: AuthUser,
     @Body() d: CreateQuotationDto,

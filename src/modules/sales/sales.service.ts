@@ -69,6 +69,17 @@ export class SalesService {
       orderBy: { createdAt: 'desc' },
     });
   }
+  async nextQuotationNumber(org: string) {
+    const quotations = await this.prisma.quotation.findMany({
+      where: { organizationId: org },
+      select: { number: true },
+    });
+    const last = quotations.reduce((highest, quotation) => {
+      const match = /^QUO-(\d+)$/i.exec(quotation.number);
+      return match ? Math.max(highest, Number(match[1])) : highest;
+    }, 0);
+    return { number: `QUO-${String(last + 1).padStart(5, '0')}` };
+  }
   async createQuotation(org: string, d: CreateQuotationDto) {
     await assertBranch(this.prisma, org, d.branchId);
     if (!d.items.length) throw new BadRequestException('At least one line item is required');
@@ -78,13 +89,20 @@ export class SalesService {
     if (!customer) throw new BadRequestException('Customer not found');
     if (new Date(d.expiryDate) < new Date(d.issueDate))
       throw new BadRequestException('Expiry date cannot be before issue date');
-    const currency = d.currency?.toUpperCase() ?? (await this.prisma.organization.findUniqueOrThrow({
-      where: { id: org },
-      select: { baseCurrency: true },
-    })).baseCurrency;
+    const currency =
+      d.currency?.toUpperCase() ??
+      (
+        await this.prisma.organization.findUniqueOrThrow({
+          where: { id: org },
+          select: { baseCurrency: true },
+        })
+      ).baseCurrency;
+    const { number: _number, ...quotationData } = d;
+    const number = (await this.nextQuotationNumber(org)).number;
     return this.prisma.quotation.create({
       data: {
-        ...d,
+        ...quotationData,
+        number,
         currency,
         organizationId: org,
         issueDate: new Date(d.issueDate),
@@ -100,10 +118,12 @@ export class SalesService {
     if (!row) throw new NotFoundException('Quotation not found');
     if (row.status === 'CONVERTED')
       throw new BadRequestException('Converted quotation cannot be edited');
+    const { number: _number, ...quotationData } = d;
     return this.prisma.quotation.update({
       where: { id },
       data: {
-        ...d,
+        ...quotationData,
+        number: d.number ?? row.number,
         issueDate: new Date(d.issueDate),
         expiryDate: new Date(d.expiryDate),
         items: d.items as unknown as Prisma.InputJsonValue,
