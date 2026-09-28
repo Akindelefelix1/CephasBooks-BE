@@ -64,6 +64,40 @@ describe('SalesService', () => {
     await expect(service.nextQuotationNumber('org-a')).resolves.toEqual({ number: 'QUO-00012' });
   });
 
+  it('uses the standard invoice sequence when converting a quotation', async () => {
+    const create = jest.fn().mockResolvedValue({ id: 'invoice', number: 'INV-00008' });
+    const update = jest.fn().mockResolvedValue({});
+    const tx = { invoice: { create }, quotation: { update } };
+    const service = new SalesService({
+      quotation: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'quote',
+          organizationId: 'org-a',
+          branchId: null,
+          customerId: 'customer',
+          status: 'ACCEPTED',
+          currency: 'NGN',
+          subtotal: new Prisma.Decimal(100),
+          taxTotal: new Prisma.Decimal(0),
+          total: new Prisma.Decimal(100),
+          notes: null,
+          items: [{ name: 'Item', description: 'Item', quantity: 1, unitPrice: 100, taxRate: 0 }],
+        }),
+      },
+      invoice: {
+        findMany: jest.fn().mockResolvedValue([{ number: 'INV-00007' }, { number: 'legacy' }]),
+      },
+      $transaction: jest
+        .fn()
+        .mockImplementation((operation: (client: typeof tx) => unknown) => operation(tx)),
+    } as never);
+
+    await service.convertQuotation('org-a', 'quote');
+    expect((create.mock.calls[0]?.[0] as { data: { number: string } }).data.number).toBe(
+      'INV-00008',
+    );
+  });
+
   it('rejects payments greater than the outstanding invoice balance', async () => {
     const tx = {
       invoice: {

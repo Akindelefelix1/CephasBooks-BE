@@ -120,13 +120,13 @@ export class InvoicesService {
     const rows = invoice.items
       .map(
         (item) =>
-          `<tr><td>${escapeHtml(item.description)}</td><td align="center">${item.quantity.toString()}</td><td align="right">${money.format(Number(item.unitPrice))}</td><td align="right">${money.format(Number(item.lineTotal))}</td></tr>`,
+          `<tr><td>${escapeHtml(item.name)}</td><td>${escapeHtml(item.description)}</td><td align="center">${item.quantity.toString()}</td><td align="right">${money.format(Number(item.unitPrice))}</td><td align="right">${money.format(Number(item.lineTotal))}</td></tr>`,
       )
       .join('');
     await this.mail?.send({
       to: invoice.customer.email,
       subject: `Invoice ${invoice.number} from ${invoice.organization.name}`,
-      html: `<main style="max-width:680px;margin:auto;padding:32px;font-family:Arial,sans-serif;color:#20242c;border-top:8px solid #ff8500"><h1 style="margin:0">Invoice</h1><p>${escapeHtml(invoice.organization.name)}</p><p><strong>Invoice no.</strong> ${escapeHtml(invoice.number)}<br><strong>Due date:</strong> ${invoice.dueDate.toLocaleDateString('en-NG')}</p><p><strong>Bill to:</strong> ${escapeHtml(invoice.customer.displayName)}${invoice.shippingAddress ? `<br><strong>Ship to:</strong> ${escapeHtml(invoice.shippingAddress)}` : ''}</p><table width="100%" cellspacing="0" cellpadding="10" style="border-collapse:collapse;background:#fff"><thead style="background:#f3f4f6"><tr><th align="left">Description</th><th>Qty</th><th align="right">Unit price</th><th align="right">Amount</th></tr></thead><tbody>${rows}</tbody></table><p style="text-align:right">Shipping: ${money.format(Number(invoice.shippingAmount))}</p><p style="text-align:right;font-size:18px"><strong>Total: ${money.format(Number(invoice.total))}</strong></p><p>${escapeHtml(invoice.notes || 'Thank you for your business.')}</p></main>`,
+      html: `<main style="max-width:680px;margin:auto;padding:32px;font-family:Arial,sans-serif;color:#20242c;border-top:8px solid #ff8500"><h1 style="margin:0">Invoice</h1><p>${escapeHtml(invoice.organization.name)}</p><p><strong>Invoice no.</strong> ${escapeHtml(invoice.number)}<br><strong>Due date:</strong> ${invoice.dueDate.toLocaleDateString('en-NG')}</p><p><strong>Bill to:</strong> ${escapeHtml(invoice.customer.displayName)}${invoice.shippingAddress ? `<br><strong>Ship to:</strong> ${escapeHtml(invoice.shippingAddress)}` : ''}</p><table width="100%" cellspacing="0" cellpadding="10" style="border-collapse:collapse;background:#fff"><thead style="background:#f3f4f6"><tr><th align="left">Product/service</th><th align="left">Description</th><th>Qty</th><th align="right">Unit price</th><th align="right">Amount</th></tr></thead><tbody>${rows}</tbody></table><p style="text-align:right">Shipping: ${money.format(Number(invoice.shippingAmount))}</p><p style="text-align:right;font-size:18px"><strong>Total: ${money.format(Number(invoice.total))}</strong></p><p>${escapeHtml(invoice.notes || 'Thank you for your business.')}</p></main>`,
     });
     if (invoice.status === 'DRAFT')
       await this.prisma.invoice.update({ where: { id }, data: { status: 'SENT' } });

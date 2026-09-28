@@ -118,7 +118,7 @@ export class ExpenseStatusDto {
   @IsEnum(ExpenseStatus) status!: ExpenseStatus;
 }
 export class ConvertOrderDto {
-  @IsString() number!: string;
+  @IsOptional() @IsString() number?: string;
   @IsDateString() issueDate!: string;
   @IsDateString() dueDate!: string;
 }

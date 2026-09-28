@@ -80,6 +80,17 @@ export class SalesService {
     }, 0);
     return { number: `QUO-${String(last + 1).padStart(5, '0')}` };
   }
+  private async nextInvoiceNumber(org: string) {
+    const invoices = await this.prisma.invoice.findMany({
+      where: { organizationId: org },
+      select: { number: true },
+    });
+    const last = invoices.reduce((highest, invoice) => {
+      const match = /^INV-(\d+)$/i.exec(invoice.number);
+      return match ? Math.max(highest, Number(match[1])) : highest;
+    }, 0);
+    return `INV-${String(last + 1).padStart(5, '0')}`;
+  }
   async createQuotation(org: string, d: CreateQuotationDto) {
     await assertBranch(this.prisma, org, d.branchId);
     if (!d.items.length) throw new BadRequestException('At least one line item is required');
@@ -123,7 +134,7 @@ export class SalesService {
       where: { id },
       data: {
         ...quotationData,
-        number: d.number ?? row.number,
+        number: row.number,
         issueDate: new Date(d.issueDate),
         expiryDate: new Date(d.expiryDate),
         items: d.items as unknown as Prisma.InputJsonValue,
@@ -158,13 +169,14 @@ export class SalesService {
       unitPrice: number;
       taxRate: number;
     }>;
+    const invoiceNumber = await this.nextInvoiceNumber(org);
     return this.prisma.$transaction(async (tx) => {
       const invoice = await tx.invoice.create({
         data: {
           organizationId: org,
           branchId: quote.branchId,
           customerId: quote.customerId,
-          number: `INV-${Date.now()}`,
+          number: invoiceNumber,
           status: 'DRAFT',
           currency: quote.currency,
           issueDate: new Date(),

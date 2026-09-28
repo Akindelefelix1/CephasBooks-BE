@@ -43,6 +43,17 @@ export class PurchasesService {
     });
     return organization.baseCurrency;
   }
+  private async nextBillNumber(org: string) {
+    const bills = await this.db.bill.findMany({
+      where: { organizationId: org },
+      select: { number: true },
+    });
+    const last = bills.reduce((highest, bill) => {
+      const match = /^BILL-(\d+)$/i.exec(bill.number);
+      return match ? Math.max(highest, Number(match[1])) : highest;
+    }, 0);
+    return `BILL-${String(last + 1).padStart(5, '0')}`;
+  }
   private markOverdue(org: string) {
     const today = new Date();
     today.setUTCHours(0, 0, 0, 0);
@@ -208,7 +219,7 @@ export class PurchasesService {
     }
     const t = this.totals(d.items);
     const currency = await this.currency(org, d.currency);
-    const bill = await this.db.$transaction(async (tx) => {
+    return this.db.$transaction(async (tx) => {
       const o = await tx.purchaseOrder.create({
         data: {
           ...d,
@@ -228,14 +239,6 @@ export class PurchasesService {
         });
       return o;
     });
-    await this.workflows?.executeEvent(org, 'BILL_CREATED', {
-      entityType: 'BILL',
-      entityId: bill.id,
-      reference: bill.number,
-      title: `Approve bill ${bill.number}`,
-      amount: Number(bill.total),
-    });
-    return bill;
   }
   async orderStatus(org: string, id: string, status: PurchaseOrderStatus) {
     const x = await this.db.purchaseOrder.findFirst({ where: { id, organizationId: org } });
@@ -276,7 +279,7 @@ export class PurchasesService {
     }
     const t = this.totals(d.items);
     const currency = await this.currency(org, d.currency);
-    return this.db.$transaction(async (tx) => {
+    const bill = await this.db.$transaction(async (tx) => {
       const b = await tx.bill.create({
         data: {
           ...d,
@@ -296,11 +299,19 @@ export class PurchasesService {
         });
       return b;
     });
+    await this.workflows?.executeEvent(org, 'BILL_CREATED', {
+      entityType: 'BILL',
+      entityId: bill.id,
+      reference: bill.number,
+      title: `Approve bill ${bill.number}`,
+      amount: Number(bill.total),
+    });
+    return bill;
   }
   async orderToBill(
     org: string,
     id: string,
-    d: { number: string; issueDate: string; dueDate: string },
+    d: { number?: string; issueDate: string; dueDate: string },
   ) {
     const o = await this.db.purchaseOrder.findFirst({
       where: {
@@ -310,11 +321,12 @@ export class PurchasesService {
       },
     });
     if (!o) throw new BadRequestException('Purchase order is unavailable');
+    const number = d.number || (await this.nextBillNumber(org));
     return this.createBill(org, {
       branchId: o.branchId ?? undefined,
       supplierId: o.supplierId,
       purchaseOrderId: o.id,
-      number: d.number,
+      number,
       issueDate: d.issueDate,
       dueDate: d.dueDate,
       currency: o.currency,
