@@ -25,6 +25,7 @@ import {
   ProjectDto,
   ProjectPlanDto,
   ProjectStatusDto,
+  RestockDto,
   TransferDto,
   WarehouseDto,
 } from './dto/operations.dto.ts';
@@ -80,6 +81,13 @@ export class OperationsController {
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.operations.deleteProduct(u.organizationId, id, u);
+  }
+  @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT) @Post('products/:id/restock') restockProduct(
+    @CurrentUser() u: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() d: RestockDto,
+  ) {
+    return this.operations.restockProduct(u.organizationId, id, d, u);
   }
   @Get('warehouses') warehouses(@CurrentUser() u: AuthUser, @Query() q: Record<string, string>) {
     return this.operations.warehouses(u.organizationId, q);

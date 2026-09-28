@@ -9,6 +9,7 @@ import type {
   ProductDto,
   ProjectDto,
   ProjectPlanDto,
+  RestockDto,
   TransferDto,
   WarehouseDto,
 } from './dto/operations.dto.ts';
@@ -337,6 +338,49 @@ export class OperationsService {
       await tx.product.delete({ where: { id } });
     });
     return { deleted: true };
+  }
+
+  async restockProduct(org: string, id: string, d: RestockDto, actor: AuthUser) {
+    const [product, warehouse] = await Promise.all([
+      this.product(org, id, true),
+      this.warehouse(org, d.warehouseId, true),
+    ]);
+    if (product.type === 'SERVICE') throw new BadRequestException('Services cannot be restocked');
+    const reference = d.reference?.trim() || `RESTOCK-${product.sku}-${randomUUID()}`;
+    return this.db.$transaction(async (tx) => {
+      const movement = await tx.stockMovement.create({
+        data: {
+          organizationId: org,
+          productId: id,
+          warehouseId: warehouse.id,
+          type: 'RECEIPT',
+          quantity: d.quantity,
+          unitCost: d.unitCost,
+          movementDate: this.dateOnly(d.movementDate),
+          reference,
+          notes: d.notes?.trim() || 'Product restock',
+        },
+        include: { warehouse: { select: { id: true, code: true, name: true } } },
+      });
+      await tx.auditLog.create({
+        data: {
+          organizationId: org,
+          actorId: actor.sub,
+          action: 'RESTOCK',
+          entityType: 'Product',
+          entityId: id,
+          metadata: {
+            email: actor.email,
+            reference,
+            warehouseId: warehouse.id,
+            warehouse: warehouse.name,
+            quantity: d.quantity,
+            unitCost: d.unitCost,
+          },
+        },
+      });
+      return movement;
+    });
   }
 
   warehouses(org: string, q: Record<string, string>) {

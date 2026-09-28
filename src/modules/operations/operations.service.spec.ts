@@ -128,6 +128,70 @@ describe('OperationsService', () => {
     expect(transaction).not.toHaveBeenCalled();
   });
 
+  it('records a restock movement and its actor in one transaction', async () => {
+    const movement = {
+      id: 'movement',
+      quantity: new Prisma.Decimal(12),
+      warehouse: { id: 'warehouse', code: 'MAIN', name: 'Main warehouse' },
+    };
+    const createMovement = jest.fn().mockResolvedValue(movement);
+    const createAudit = jest.fn().mockResolvedValue({});
+    const tx = {
+      stockMovement: { create: createMovement },
+      auditLog: { create: createAudit },
+    };
+    const service = new OperationsService({
+      product: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'product', sku: 'SKU-1', type: 'PRODUCT' }),
+      },
+      warehouse: {
+        findFirst: jest
+          .fn()
+          .mockResolvedValue({ id: 'warehouse', code: 'MAIN', name: 'Main warehouse' }),
+      },
+      $transaction: jest
+        .fn()
+        .mockImplementation((operation: (client: typeof tx) => unknown) => operation(tx)),
+    } as never);
+
+    await expect(
+      service.restockProduct(
+        'org-a',
+        'product',
+        {
+          warehouseId: 'warehouse',
+          quantity: 12,
+          unitCost: 250,
+          movementDate: '2026-09-28',
+          reference: 'DELIVERY-42',
+          notes: 'Supplier delivery',
+        },
+        {
+          sub: 'user-a',
+          email: 'stock@example.com',
+          organizationId: 'org-a',
+          role: 'ACCOUNTANT',
+        },
+      ),
+    ).resolves.toEqual(movement);
+    expect(createMovement).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          productId: 'product',
+          warehouseId: 'warehouse',
+          type: 'RECEIPT',
+          quantity: 12,
+          reference: 'DELIVERY-42',
+        }),
+      }),
+    );
+    expect(createAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ action: 'RESTOCK', actorId: 'user-a' }),
+      }),
+    );
+  });
+
   it('only permits approval or void as draft adjustment transitions', async () => {
     const service = new OperationsService({
       stockAdjustment: {

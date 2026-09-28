@@ -56,6 +56,15 @@ export class MovementDto {
   @IsOptional() @IsString() notes?: string;
 }
 
+export class RestockDto {
+  @IsUUID() warehouseId!: string;
+  @Type(() => Number) @IsNumber() @Min(0.0001) quantity!: number;
+  @Type(() => Number) @IsNumber() @Min(0) unitCost!: number;
+  @IsDateString() movementDate!: string;
+  @IsOptional() @IsString() @MaxLength(120) reference?: string;
+  @IsOptional() @IsString() @MaxLength(1000) notes?: string;
+}
+
 export class TransferDto {
   @IsUUID() productId!: string;
   @IsUUID() fromWarehouseId!: string;
