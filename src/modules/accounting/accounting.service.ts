@@ -1,19 +1,27 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { FinanceRecordKind, LedgerAccountType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.ts';
+import { postAutomaticJournal } from '../../common/automatic-accounting.ts';
 import { AccountDto, FinanceRecordDto, JournalDto, JournalLineDto } from './dto/accounting.dto.ts';
 const defaults: [string, string, LedgerAccountType][] = [
   ['1000', 'Cash and bank', 'ASSET'],
   ['1100', 'Accounts receivable', 'ASSET'],
   ['1150', 'Tax receivable', 'ASSET'],
   ['1200', 'Fixed assets', 'ASSET'],
+  ['1300', 'Inventory', 'ASSET'],
   ['2000', 'Accounts payable', 'LIABILITY'],
   ['2100', 'Tax payable', 'LIABILITY'],
   ['3000', 'Retained earnings', 'EQUITY'],
+  ['3900', 'Opening balance equity', 'EQUITY'],
   ['4000', 'Sales revenue', 'INCOME'],
+  ['4900', 'Inventory adjustment gain', 'INCOME'],
   ['5000', 'Purchases', 'EXPENSE'],
   ['5100', 'Operating expenses', 'EXPENSE'],
   ['5200', 'Payroll expense', 'EXPENSE'],
+  ['5300', 'Cost of goods sold', 'EXPENSE'],
+  ['5400', 'Fixed asset disposal loss', 'EXPENSE'],
+  ['5900', 'Inventory adjustment loss', 'EXPENSE'],
+  ['9999', 'Uncategorized bank transactions', 'LIABILITY'],
 ];
 @Injectable()
 export class AccountingService {
@@ -191,75 +199,8 @@ export class AccountingService {
         b.credit = b.credit.add(x.credit);
       }
     }
-    const system = new Map(accounts.map((a) => [a.code, a.id]));
-    const [banks, invoices, bills, expenses, assets, payroll] = await this.db.$transaction([
-      this.db.bankAccount.aggregate({
-        where: { organizationId: org, isActive: true },
-        _sum: { currentBalance: true },
-      }),
-      this.db.invoice.aggregate({
-        where: { organizationId: org, status: { not: 'VOID' } },
-        _sum: { total: true, paidAmount: true, creditedAmount: true, taxTotal: true },
-      }),
-      this.db.bill.aggregate({
-        where: { organizationId: org, status: { not: 'VOID' } },
-        _sum: { total: true, paidAmount: true, taxTotal: true },
-      }),
-      this.db.expense.aggregate({
-        where: { organizationId: org, status: 'APPROVED' },
-        _sum: { amount: true, taxAmount: true },
-      }),
-      this.db.financeRecord.aggregate({
-        where: { organizationId: org, kind: 'ASSET', status: { not: 'DISPOSED' } },
-        _sum: { amount: true },
-      }),
-      this.db.financeRecord.aggregate({
-        where: { organizationId: org, kind: 'PAYROLL', status: { in: ['APPROVED', 'PAID'] } },
-        _sum: { amount: true },
-      }),
-    ]);
-    const add = (
-      code: string,
-      debit: Prisma.Decimal | number = 0,
-      credit: Prisma.Decimal | number = 0,
-    ) => {
-      const id = system.get(code),
-        b = id && balances.get(id);
-      if (b) {
-        b.debit = b.debit.add(debit);
-        b.credit = b.credit.add(credit);
-      }
-    };
-    const invTotal = invoices._sum.total ?? new Prisma.Decimal(0),
-      ar = invTotal.sub(invoices._sum.paidAmount ?? 0).sub(invoices._sum.creditedAmount ?? 0),
-      billTotal = bills._sum.total ?? new Prisma.Decimal(0),
-      ap = billTotal.sub(bills._sum.paidAmount ?? 0),
-      expense = expenses._sum.amount ?? new Prisma.Decimal(0),
-      asset = assets._sum.amount ?? new Prisma.Decimal(0),
-      payrollTotal = payroll._sum.amount ?? new Prisma.Decimal(0);
-    add('1000', banks._sum.currentBalance ?? 0);
-    add('1100', ar);
-    add('1200', asset);
-    add('2000', 0, ap);
-    const netTax = (invoices._sum.taxTotal ?? new Prisma.Decimal(0))
-      .sub(bills._sum.taxTotal ?? 0)
-      .sub(expenses._sum.taxAmount ?? 0);
-    if (netTax.gte(0)) add('2100', 0, netTax);
-    else add('1150', netTax.abs());
-    add('4000', 0, invTotal);
-    add('5000', billTotal);
-    add('5100', expense);
-    add('5200', payrollTotal);
     let debit = new Prisma.Decimal(0),
       credit = new Prisma.Decimal(0);
-    for (const b of balances.values()) {
-      debit = debit.add(b.debit);
-      credit = credit.add(b.credit);
-    }
-    if (debit.gte(credit)) add('3000', 0, debit.sub(credit));
-    else add('3000', credit.sub(debit));
-    debit = new Prisma.Decimal(0);
-    credit = new Prisma.Decimal(0);
     for (const b of balances.values()) {
       debit = debit.add(b.debit);
       credit = credit.add(b.credit);
@@ -296,15 +237,19 @@ export class AccountingService {
   createRecord(org: string, d: FinanceRecordDto) {
     if (d.endDate && new Date(d.endDate) < new Date(d.startDate))
       throw new BadRequestException('End date cannot be before start date');
-    return this.db.financeRecord.create({
-      data: {
-        ...d,
-        organizationId: org,
-        startDate: new Date(d.startDate),
-        endDate: d.endDate ? new Date(d.endDate) : undefined,
-        amount: new Prisma.Decimal(d.amount),
-        data: d.data as Prisma.InputJsonValue,
-      },
+    return this.db.$transaction(async (tx) => {
+      const record = await tx.financeRecord.create({
+        data: {
+          ...d,
+          organizationId: org,
+          startDate: new Date(d.startDate),
+          endDate: d.endDate ? new Date(d.endDate) : undefined,
+          amount: new Prisma.Decimal(d.amount),
+          data: d.data as Prisma.InputJsonValue,
+        },
+      });
+      await this.postFinanceRecord(tx, org, record);
+      return record;
     });
   }
   async recordStatus(org: string, id: string, status: string) {
@@ -319,7 +264,61 @@ export class AccountingService {
     };
     if (!allowed[r.status]?.includes(status))
       throw new BadRequestException('Invalid status transition');
-    return this.db.financeRecord.update({ where: { id }, data: { status } });
+    return this.db.$transaction(async (tx) => {
+      const updated = await tx.financeRecord.update({ where: { id }, data: { status } });
+      await this.postFinanceRecord(tx, org, updated);
+      return updated;
+    });
+  }
+  private async postFinanceRecord(
+    tx: Prisma.TransactionClient,
+    org: string,
+    record: { id: string; kind: FinanceRecordKind; reference: string; name: string; startDate: Date; amount: Prisma.Decimal; status: string },
+  ) {
+    if (record.kind === 'ASSET' && ['ACTIVE', 'APPROVED', 'PAID'].includes(record.status))
+      await postAutomaticJournal(tx, {
+        organizationId: org,
+        number: `AUTO-ASSET-${record.id}`,
+        journalDate: record.startDate,
+        description: `Fixed asset acquisition ${record.reference}`,
+        lines: [
+          { accountCode: '1200', debit: record.amount, credit: 0, memo: record.name },
+          { accountCode: '1000', debit: 0, credit: record.amount, memo: 'Asset payment' },
+        ],
+      });
+    if (record.kind === 'ASSET' && record.status === 'DISPOSED')
+      await postAutomaticJournal(tx, {
+        organizationId: org,
+        number: `AUTO-ASSET-DISPOSAL-${record.id}`,
+        journalDate: new Date(),
+        description: `Fixed asset disposal ${record.reference}`,
+        lines: [
+          { accountCode: '5400', debit: record.amount, credit: 0, memo: record.name },
+          { accountCode: '1200', debit: 0, credit: record.amount, memo: 'Remove disposed asset' },
+        ],
+      });
+    if (record.kind === 'PAYROLL' && ['APPROVED', 'PAID'].includes(record.status))
+      await postAutomaticJournal(tx, {
+        organizationId: org,
+        number: `AUTO-PAYROLL-${record.id}`,
+        journalDate: record.startDate,
+        description: `Payroll accrual ${record.reference}`,
+        lines: [
+          { accountCode: '5200', debit: record.amount, credit: 0, memo: record.name },
+          { accountCode: '2000', debit: 0, credit: record.amount, memo: 'Payroll payable' },
+        ],
+      });
+    if (record.kind === 'PAYROLL' && record.status === 'PAID')
+      await postAutomaticJournal(tx, {
+        organizationId: org,
+        number: `AUTO-PAYROLL-PAYMENT-${record.id}`,
+        journalDate: new Date(),
+        description: `Payroll payment ${record.reference}`,
+        lines: [
+          { accountCode: '2000', debit: record.amount, credit: 0, memo: 'Payroll payable' },
+          { accountCode: '1000', debit: 0, credit: record.amount, memo: 'Payroll payment' },
+        ],
+      });
   }
   async summary(org: string) {
     const rows = await this.db.financeRecord.groupBy({

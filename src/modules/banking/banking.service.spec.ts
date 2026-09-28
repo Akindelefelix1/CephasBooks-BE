@@ -42,8 +42,26 @@ describe('BankingService', () => {
   });
 
   it('sets both opening and current balances when an account is created', async () => {
-    const create = jest.fn().mockImplementation((input) => Promise.resolve(input));
-    const service = new BankingService({ bankAccount: { create } } as never);
+    const create = jest.fn().mockImplementation((input) =>
+      Promise.resolve({ ...input.data, id: 'bank-account-id' }),
+    );
+    const transaction = jest.fn().mockImplementation((operation) =>
+      operation({
+        bankAccount: { create },
+        journal: {
+          findFirst: jest.fn().mockResolvedValue(null),
+          create: jest.fn().mockImplementation((input) => Promise.resolve(input.data)),
+        },
+        ledgerAccount: {
+          upsert: jest.fn(),
+          findMany: jest.fn().mockResolvedValue([
+            { id: 'cash-id', code: '1000' },
+            { id: 'opening-id', code: '3900' },
+          ]),
+        },
+      }),
+    );
+    const service = new BankingService({ $transaction: transaction } as never);
     await service.createAccount('org-a', {
       name: 'Main account',
       bankName: 'Bank',
@@ -59,6 +77,7 @@ describe('BankingService', () => {
     expect(data.organizationId).toBe('org-a');
     expect(data.currency).toBe('NGN');
     expect(data.currentBalance.toString()).toBe('250');
+    expect(transaction).toHaveBeenCalledTimes(1);
   });
 
   it('rejects transfers that use the same source and destination account', async () => {

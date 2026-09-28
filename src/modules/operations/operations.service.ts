@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { AdjustmentStatus, Prisma, ProjectStatus } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../database/prisma.service.ts';
+import { postAutomaticJournal } from '../../common/automatic-accounting.ts';
 import type { AuthUser } from '../../common/decorators/current-user.decorator.ts';
 import type {
   AdjustmentDto,
@@ -233,8 +234,8 @@ export class OperationsService {
             metadata: { email: actor.email, sku: product.sku, name: product.name },
           },
         });
-      if (openingQuantity > 0 && stockWarehouseId)
-        await tx.stockMovement.create({
+      if (openingQuantity > 0 && stockWarehouseId) {
+        const movement = await tx.stockMovement.create({
           data: {
             organizationId: org,
             productId: product.id,
@@ -247,6 +248,19 @@ export class OperationsService {
             notes: 'Opening stock on product creation',
           },
         });
+        const openingValue = new Prisma.Decimal(openingQuantity).mul(product.costPrice);
+        if (openingValue.gt(0))
+          await postAutomaticJournal(tx, {
+            organizationId: org,
+            number: `AUTO-STOCK-OPENING-${product.id}`,
+            journalDate: movement.movementDate,
+            description: `Opening stock ${product.sku}`,
+            lines: [
+              { accountCode: '1300', debit: openingValue, credit: 0, memo: product.name },
+              { accountCode: '3900', debit: 0, credit: openingValue, memo: 'Opening stock equity' },
+            ],
+          });
+      }
       return product;
     });
   }
@@ -364,6 +378,18 @@ export class OperationsService {
         },
         include: { warehouse: { select: { id: true, code: true, name: true } } },
       });
+      const restockValue = new Prisma.Decimal(d.quantity).mul(d.unitCost);
+      if (restockValue.gt(0))
+        await postAutomaticJournal(tx, {
+          organizationId: org,
+          number: `AUTO-STOCK-RESTOCK-${movement.id}`,
+          journalDate: movement.movementDate,
+          description: `Inventory restock ${reference}`,
+          lines: [
+            { accountCode: '1300', debit: restockValue, credit: 0, memo: product.name },
+            { accountCode: '2000', debit: 0, credit: restockValue, memo: 'Inventory payable' },
+          ],
+        });
       await tx.auditLog.create({
         data: {
           organizationId: org,
@@ -457,8 +483,45 @@ export class OperationsService {
       throw new BadRequestException('Services cannot have stock movements');
     if (['ISSUE', 'TRANSFER_OUT'].includes(d.type))
       await this.requireStock(org, d.productId, d.warehouseId, d.quantity);
-    return this.db.stockMovement.create({
-      data: { ...d, movementDate: this.dateOnly(d.movementDate), organizationId: org },
+    return this.db.$transaction(async (tx) => {
+      const movement = await tx.stockMovement.create({
+        data: { ...d, movementDate: this.dateOnly(d.movementDate), organizationId: org },
+      });
+      const value = new Prisma.Decimal(d.quantity).mul(d.unitCost);
+      if (value.gt(0) && d.type === 'RECEIPT')
+        await postAutomaticJournal(tx, {
+          organizationId: org,
+          number: `AUTO-STOCK-MOVEMENT-${movement.id}`,
+          journalDate: movement.movementDate,
+          description: `Inventory receipt ${movement.reference}`,
+          lines: [
+            { accountCode: '1300', debit: value, credit: 0, memo: product.name },
+            { accountCode: '2000', debit: 0, credit: value, memo: 'Inventory payable' },
+          ],
+        });
+      if (value.gt(0) && d.type === 'ISSUE')
+        await postAutomaticJournal(tx, {
+          organizationId: org,
+          number: `AUTO-STOCK-MOVEMENT-${movement.id}`,
+          journalDate: movement.movementDate,
+          description: `Inventory issue ${movement.reference}`,
+          lines: [
+            { accountCode: '5300', debit: value, credit: 0, memo: product.name },
+            { accountCode: '1300', debit: 0, credit: value, memo: 'Inventory issued' },
+          ],
+        });
+      if (value.gt(0) && d.type === 'ADJUSTMENT')
+        await postAutomaticJournal(tx, {
+          organizationId: org,
+          number: `AUTO-STOCK-MOVEMENT-${movement.id}`,
+          journalDate: movement.movementDate,
+          description: `Inventory adjustment ${movement.reference}`,
+          lines: [
+            { accountCode: '1300', debit: value, credit: 0, memo: product.name },
+            { accountCode: '4900', debit: 0, credit: value, memo: 'Inventory adjustment gain' },
+          ],
+        });
+      return movement;
     });
   }
   async transfer(org: string, d: TransferDto) {
@@ -565,6 +628,26 @@ export class OperationsService {
             notes: adjustment.reason,
           },
         });
+      if (status === 'APPROVED') {
+        const value = adjustment.quantityDelta.abs().mul(adjustment.unitCost);
+        if (value.gt(0))
+          await postAutomaticJournal(tx, {
+            organizationId: org,
+            number: `AUTO-STOCK-ADJUSTMENT-${adjustment.id}`,
+            journalDate: adjustment.adjustmentDate,
+            description: `Inventory adjustment ${adjustment.reference}`,
+            lines:
+              adjustment.quantityDelta.gt(0)
+                ? [
+                    { accountCode: '1300', debit: value, credit: 0, memo: 'Inventory increase' },
+                    { accountCode: '4900', debit: 0, credit: value, memo: adjustment.reason },
+                  ]
+                : [
+                    { accountCode: '5900', debit: value, credit: 0, memo: adjustment.reason },
+                    { accountCode: '1300', debit: 0, credit: value, memo: 'Inventory decrease' },
+                  ],
+          });
+      }
       return updated;
     });
   }

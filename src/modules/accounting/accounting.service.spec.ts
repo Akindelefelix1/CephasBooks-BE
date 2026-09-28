@@ -59,4 +59,41 @@ describe('AccountingService', () => {
       }),
     );
   });
+
+  it('builds trial balance only from posted journal lines', async () => {
+    const accounts = [
+      { id: 'cash', code: '1000', name: 'Cash and bank' },
+      { id: 'sales', code: '4000', name: 'Sales revenue' },
+    ];
+    const journalFindMany = jest.fn().mockResolvedValue([
+      {
+        id: 'journal',
+        number: 'POS-1',
+        journalDate: new Date('2026-09-28'),
+        description: 'POS sale',
+        status: 'POSTED',
+        lines: [
+          { accountId: 'cash', debit: 100000, credit: 0 },
+          { accountId: 'sales', debit: 0, credit: 100000 },
+        ],
+      },
+    ]);
+    const service = new AccountingService({
+      ledgerAccount: {
+        upsert: jest.fn(),
+        findMany: jest.fn().mockResolvedValue(accounts),
+      },
+      journal: { findMany: journalFindMany },
+    } as never);
+
+    const result = await service.trialBalance('org-a', {});
+
+    expect(result.totalDebit.toString()).toBe('100000');
+    expect(result.totalCredit.toString()).toBe('100000');
+    expect(result.rows.map((row) => [row.account.code, row.debit.toString(), row.credit.toString()])).toEqual([
+      ['1000', '100000', '0'],
+      ['4000', '0', '100000'],
+    ]);
+    expect(journalFindMany).toHaveBeenCalledTimes(1);
+  });
 });

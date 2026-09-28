@@ -132,6 +132,8 @@ describe('OperationsService', () => {
     const movement = {
       id: 'movement',
       quantity: new Prisma.Decimal(12),
+      unitCost: new Prisma.Decimal(250),
+      movementDate: new Date('2026-09-28'),
       warehouse: { id: 'warehouse', code: 'MAIN', name: 'Main warehouse' },
     };
     const createMovement = jest.fn().mockResolvedValue(movement);
@@ -139,10 +141,27 @@ describe('OperationsService', () => {
     const tx = {
       stockMovement: { create: createMovement },
       auditLog: { create: createAudit },
+      journal: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockImplementation((input) => Promise.resolve(input.data)),
+      },
+      ledgerAccount: {
+        upsert: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([
+          { id: 'inventory-id', code: '1300' },
+          { id: 'payable-id', code: '2000' },
+        ]),
+      },
     };
     const service = new OperationsService({
       product: {
-        findFirst: jest.fn().mockResolvedValue({ id: 'product', sku: 'SKU-1', type: 'PRODUCT' }),
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'product',
+          sku: 'SKU-1',
+          name: 'Book',
+          costPrice: new Prisma.Decimal(250),
+          type: 'PRODUCT',
+        }),
       },
       warehouse: {
         findFirst: jest

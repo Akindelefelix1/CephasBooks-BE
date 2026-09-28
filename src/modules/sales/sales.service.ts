@@ -3,6 +3,7 @@ import { Prisma, SalesDocumentStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.ts';
 import { CreditNoteDto, CreateQuotationDto, PaymentDto } from './dto/sales.dto.ts';
 import { assertBranch } from '../../common/branch-scope.ts';
+import { postAutomaticJournal, reverseAutomaticJournal } from '../../common/automatic-accounting.ts';
 @Injectable()
 export class SalesService {
   constructor(private readonly prisma: PrismaService) {}
@@ -235,6 +236,22 @@ export class SalesService {
         amount = new Prisma.Decimal(d.amount);
       if (amount.gt(outstanding)) throw new BadRequestException('Payment exceeds invoice balance');
       const paid = inv.paidAmount.add(amount);
+      await postAutomaticJournal(tx, {
+        organizationId: org,
+        number: `AUTO-INVOICE-${inv.id}`,
+        journalDate: inv.issueDate,
+        description: `Invoice ${inv.number}`,
+        lines: [
+          { accountCode: '1100', debit: inv.total, credit: 0, memo: 'Accounts receivable' },
+          {
+            accountCode: '4000',
+            debit: 0,
+            credit: inv.total.sub(inv.taxTotal),
+            memo: 'Sales revenue',
+          },
+          { accountCode: '2100', debit: 0, credit: inv.taxTotal, memo: 'Tax payable' },
+        ],
+      });
       const payment = await tx.paymentReceived.create({
         data: {
           ...d,
@@ -253,6 +270,16 @@ export class SalesService {
           status: paid.add(inv.creditedAmount).gte(inv.total) ? 'PAID' : 'PARTIALLY_PAID',
         },
       });
+      await postAutomaticJournal(tx, {
+        organizationId: org,
+        number: `AUTO-RECEIPT-${payment.id}`,
+        journalDate: payment.paymentDate,
+        description: `Customer receipt ${payment.reference}`,
+        lines: [
+          { accountCode: '1000', debit: amount, credit: 0, memo: payment.method },
+          { accountCode: '1100', debit: 0, credit: amount, memo: 'Accounts receivable' },
+        ],
+      });
       return payment;
     });
   }
@@ -260,6 +287,13 @@ export class SalesService {
     return this.prisma.$transaction(async (tx) => {
       const p = await tx.paymentReceived.findFirst({ where: { id, organizationId: org } });
       if (!p) throw new NotFoundException('Payment not found');
+      await reverseAutomaticJournal(tx, {
+        organizationId: org,
+        number: `AUTO-RECEIPT-${p.id}`,
+        reversalNumber: `AUTO-REV-RECEIPT-${p.id}`,
+        journalDate: new Date(),
+        description: `Reverse customer receipt ${p.reference}`,
+      });
       await tx.paymentReceived.delete({ where: { id } });
       const inv = await tx.invoice.findUniqueOrThrow({ where: { id: p.invoiceId } }),
         paid = inv.paidAmount.sub(p.amount);
@@ -315,6 +349,27 @@ export class SalesService {
           amount,
         },
       });
+      await postAutomaticJournal(tx, {
+        organizationId: org,
+        number: `AUTO-CREDIT-${note.id}`,
+        journalDate: note.issueDate,
+        description: `Credit note ${note.number}`,
+        lines: [
+          {
+            accountCode: '4000',
+            debit: amount.sub(inv.total.isZero() ? 0 : amount.mul(inv.taxTotal).div(inv.total)),
+            credit: 0,
+            memo: 'Sales return',
+          },
+          {
+            accountCode: '2100',
+            debit: inv.total.isZero() ? 0 : amount.mul(inv.taxTotal).div(inv.total),
+            credit: 0,
+            memo: 'Tax adjustment',
+          },
+          { accountCode: '1100', debit: 0, credit: amount, memo: 'Accounts receivable' },
+        ],
+      });
       await tx.invoice.update({
         where: { id: inv.id },
         data: {
@@ -335,6 +390,13 @@ export class SalesService {
       if (!note) throw new NotFoundException('Credit note not found');
       await tx.creditNote.update({ where: { id }, data: { isVoid: true } });
       const invoice = await tx.invoice.findUniqueOrThrow({ where: { id: note.invoiceId } });
+      await reverseAutomaticJournal(tx, {
+        organizationId: org,
+        number: `AUTO-CREDIT-${note.id}`,
+        reversalNumber: `AUTO-REV-CREDIT-${note.id}`,
+        journalDate: new Date(),
+        description: `Reverse credit note ${note.number}`,
+      });
       const creditedAmount = invoice.creditedAmount.sub(note.amount);
       await tx.invoice.update({
         where: { id: note.invoiceId },

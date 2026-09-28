@@ -5,6 +5,9 @@ import { InvoicesService } from './invoices.service.ts';
 describe('InvoicesService', () => {
   it('persists shipping details and includes shipping in the invoice total', async () => {
     const create = jest.fn().mockImplementation((request) => Promise.resolve(request.data));
+    const transaction = jest.fn().mockImplementation((operation) =>
+      operation({ invoice: { create } }),
+    );
     const service = new InvoicesService({
       customer: {
         findFirst: jest.fn().mockResolvedValue({ id: 'customer', branchId: null }),
@@ -13,6 +16,7 @@ describe('InvoicesService', () => {
         findMany: jest.fn().mockResolvedValue([]),
         create,
       },
+      $transaction: transaction,
     } as never);
 
     await service.create('org-a', {

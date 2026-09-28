@@ -3,6 +3,7 @@ import { BankTransactionType, Prisma, ReconciliationStatus } from '@prisma/clien
 import { createHash, randomUUID } from 'node:crypto';
 import { PrismaService } from '../../database/prisma.service.ts';
 import { assertBranch } from '../../common/branch-scope.ts';
+import { postAutomaticJournal, reverseAutomaticJournal } from '../../common/automatic-accounting.ts';
 import {
   CreateBankAccountDto,
   CreateBankTransactionDto,
@@ -144,14 +145,40 @@ export class BankingService {
       where: { id: organizationId },
       select: { baseCurrency: true },
     })).baseCurrency;
-    return this.prisma.bankAccount.create({
-      data: {
-        ...dto,
-        currency,
-        openingBalance,
-        currentBalance: openingBalance,
-        organizationId,
-      },
+    return this.serializable(async (tx) => {
+      const account = await tx.bankAccount.create({
+        data: {
+          ...dto,
+          currency,
+          openingBalance,
+          currentBalance: openingBalance,
+          organizationId,
+        },
+      });
+      if (!openingBalance.isZero()) {
+        const openingAmount = openingBalance.abs();
+        await postAutomaticJournal(tx, {
+          organizationId,
+          number: `AUTO-BANK-OPENING-${account.id}`,
+          journalDate: new Date(),
+          description: `Opening balance for ${account.name}`,
+          lines: [
+            {
+              accountCode: '1000',
+              debit: openingBalance.gt(0) ? openingAmount : 0,
+              credit: openingBalance.lt(0) ? openingAmount : 0,
+              memo: account.name,
+            },
+            {
+              accountCode: '3900',
+              debit: openingBalance.lt(0) ? openingAmount : 0,
+              credit: openingBalance.gt(0) ? openingAmount : 0,
+              memo: 'Opening balance equity',
+            },
+          ],
+        });
+      }
+      return account;
     });
   }
 
@@ -222,6 +249,40 @@ export class BankingService {
     return { data, meta: { page, limit, total, pages: Math.ceil(total / limit) } };
   }
 
+  private postUncategorizedBankJournal(
+    tx: Prisma.TransactionClient,
+    organizationId: string,
+    transaction: {
+      id: string;
+      transactionDate: Date;
+      type: BankTransactionType;
+      amount: Prisma.Decimal;
+      description: string;
+    },
+  ) {
+    const received = transaction.type === 'MONEY_IN';
+    return postAutomaticJournal(tx, {
+      organizationId,
+      number: `AUTO-BANK-${transaction.id}`,
+      journalDate: transaction.transactionDate,
+      description: transaction.description,
+      lines: [
+        {
+          accountCode: received ? '1000' : '9999',
+          debit: transaction.amount,
+          credit: 0,
+          memo: received ? 'Bank receipt' : 'Uncategorized bank expense',
+        },
+        {
+          accountCode: received ? '9999' : '1000',
+          debit: 0,
+          credit: transaction.amount,
+          memo: received ? 'Uncategorized bank receipt' : 'Bank payment',
+        },
+      ],
+    });
+  }
+
   reversalHistory(organizationId: string) {
     return this.prisma.bankTransaction.findMany({
       where: { organizationId, reversedAt: { not: null } },
@@ -255,6 +316,7 @@ export class BankingService {
           notes: dto.notes,
         },
       });
+      await this.postUncategorizedBankJournal(tx, organizationId, transaction);
       await this.recalculateAccount(tx, organizationId, account.id);
       return transaction;
     });
@@ -267,7 +329,7 @@ export class BankingService {
     return this.serializable(async (tx) => {
       const created = [];
       for (const row of dto.transactions) {
-        created.push(await tx.bankTransaction.create({
+        const transaction = await tx.bankTransaction.create({
           data: {
             organizationId,
             bankAccountId: dto.bankAccountId,
@@ -280,7 +342,9 @@ export class BankingService {
             balanceAfter: account.currentBalance,
             notes: dto.notes,
           },
-        }));
+        });
+        await this.postUncategorizedBankJournal(tx, organizationId, transaction);
+        created.push(transaction);
       }
       await this.recalculateAccount(tx, organizationId, dto.bankAccountId);
       return created;
@@ -296,6 +360,18 @@ export class BankingService {
       throw new BadRequestException('Transfer entries must be reversed instead of edited');
     if (existing.sourceType)
       throw new BadRequestException('Linked transactions must be changed from their source record');
+    const automaticPosting = await this.prisma.journal.findFirst({
+      where: {
+        organizationId,
+        number: `AUTO-BANK-${existing.id}`,
+        status: 'POSTED',
+      },
+      select: { id: true },
+    });
+    if (automaticPosting)
+      throw new BadRequestException(
+        'Reverse this automatically posted transaction and enter it again to preserve the ledger audit trail',
+      );
     return this.serializable(async (tx) => {
       await tx.bankTransaction.update({
         where: { id },
@@ -344,6 +420,17 @@ export class BankingService {
         : [existing.bankAccountId];
       for (const accountId of accountIds)
         await this.recalculateAccount(tx, organizationId, accountId);
+      await reverseAutomaticJournal(tx, {
+        organizationId,
+        number: existing.transferGroupId
+          ? `AUTO-BANK-TRANSFER-${existing.transferGroupId}`
+          : `AUTO-BANK-${existing.id}`,
+        reversalNumber: existing.transferGroupId
+          ? `AUTO-REV-BANK-TRANSFER-${existing.transferGroupId}`
+          : `AUTO-REV-BANK-${existing.id}`,
+        journalDate: reversedAt,
+        description: `Reverse bank transaction ${existing.reference || existing.id}: ${normalizedReason}`,
+      });
       return { reversed: true, reversedAt };
     });
   }
@@ -395,6 +482,16 @@ export class BankingService {
       });
       await this.recalculateAccount(tx, organizationId, from.id);
       await this.recalculateAccount(tx, organizationId, to.id);
+      await postAutomaticJournal(tx, {
+        organizationId,
+        number: `AUTO-BANK-TRANSFER-${transferGroupId}`,
+        journalDate: transactionDate,
+        description: `Transfer ${from.name} to ${to.name}`,
+        lines: [
+          { accountCode: '1000', debit: amount, credit: 0, memo: to.name },
+          { accountCode: '1000', debit: 0, credit: amount, memo: from.name },
+        ],
+      });
       return { transferGroupId };
     });
   }
@@ -484,15 +581,18 @@ export class BankingService {
         throw new BadRequestException(
           'This statement contains transactions that were already imported',
         );
-      await tx.bankTransaction.createMany({
-        data: parsed.map((row) => ({
-          ...row,
-          organizationId,
-          transactionDate: new Date(row.transactionDate),
-          amount: new Prisma.Decimal(row.amount),
-          balanceAfter: 0,
-        })),
-      });
+      for (const row of parsed) {
+        const transaction = await tx.bankTransaction.create({
+          data: {
+            ...row,
+            organizationId,
+            transactionDate: new Date(row.transactionDate),
+            amount: new Prisma.Decimal(row.amount),
+            balanceAfter: 0,
+          },
+        });
+        await this.postUncategorizedBankJournal(tx, organizationId, transaction);
+      }
       await this.recalculateAccount(tx, organizationId, dto.bankAccountId);
       return { imported: parsed.length };
     });

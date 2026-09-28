@@ -5,6 +5,7 @@ import { CreateInvoiceDto } from './dto/create-invoice.dto.ts';
 import { WorkflowService } from '../workflow/workflow.service.ts';
 import { MailService } from '../mail/mail.service.ts';
 import { assertBranch } from '../../common/branch-scope.ts';
+import { postAutomaticJournal } from '../../common/automatic-accounting.ts';
 
 @Injectable()
 export class InvoicesService {
@@ -75,7 +76,8 @@ export class InvoicesService {
           select: { baseCurrency: true },
         })
       ).baseCurrency;
-    const invoice = await this.prisma.invoice.create({
+    const invoice = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.invoice.create({
       data: {
         organizationId,
         branchId: dto.branchId ?? customer.branchId,
@@ -98,6 +100,25 @@ export class InvoicesService {
         items: true,
         organization: { select: { name: true, countryCode: true } },
       },
+    });
+      if (!['DRAFT', 'VOID'].includes(created.status))
+        await postAutomaticJournal(tx, {
+          organizationId,
+          number: `AUTO-INVOICE-${created.id}`,
+          journalDate: created.issueDate,
+          description: `Invoice ${created.number}`,
+          lines: [
+            { accountCode: '1100', debit: created.total, credit: 0, memo: 'Accounts receivable' },
+            {
+              accountCode: '4000',
+              debit: 0,
+              credit: created.total.sub(created.taxTotal),
+              memo: 'Sales revenue',
+            },
+            { accountCode: '2100', debit: 0, credit: created.taxTotal, memo: 'Tax payable' },
+          ],
+        });
+      return created;
     });
     await this.workflows?.executeEvent(organizationId, 'INVOICE_CREATED', {
       entityType: 'INVOICE',
@@ -129,7 +150,25 @@ export class InvoicesService {
       html: `<main style="max-width:680px;margin:auto;padding:32px;font-family:Arial,sans-serif;color:#20242c;border-top:8px solid #ff8500"><h1 style="margin:0">Invoice</h1><p>${escapeHtml(invoice.organization.name)}</p><p><strong>Invoice no.</strong> ${escapeHtml(invoice.number)}<br><strong>Due date:</strong> ${invoice.dueDate.toLocaleDateString('en-NG')}</p><p><strong>Bill to:</strong> ${escapeHtml(invoice.customer.displayName)}${invoice.shippingAddress ? `<br><strong>Ship to:</strong> ${escapeHtml(invoice.shippingAddress)}` : ''}</p><table width="100%" cellspacing="0" cellpadding="10" style="border-collapse:collapse;background:#fff"><thead style="background:#f3f4f6"><tr><th align="left">Product/service</th><th align="left">Description</th><th>Qty</th><th align="right">Unit price</th><th align="right">Amount</th></tr></thead><tbody>${rows}</tbody></table><p style="text-align:right">Shipping: ${money.format(Number(invoice.shippingAmount))}</p><p style="text-align:right;font-size:18px"><strong>Total: ${money.format(Number(invoice.total))}</strong></p><p>${escapeHtml(invoice.notes || 'Thank you for your business.')}</p></main>`,
     });
     if (invoice.status === 'DRAFT')
-      await this.prisma.invoice.update({ where: { id }, data: { status: 'SENT' } });
+      await this.prisma.$transaction(async (tx) => {
+        const sent = await tx.invoice.update({ where: { id }, data: { status: 'SENT' } });
+        await postAutomaticJournal(tx, {
+          organizationId,
+          number: `AUTO-INVOICE-${sent.id}`,
+          journalDate: sent.issueDate,
+          description: `Invoice ${sent.number}`,
+          lines: [
+            { accountCode: '1100', debit: sent.total, credit: 0, memo: 'Accounts receivable' },
+            {
+              accountCode: '4000',
+              debit: 0,
+              credit: sent.total.sub(sent.taxTotal),
+              memo: 'Sales revenue',
+            },
+            { accountCode: '2100', debit: 0, credit: sent.taxTotal, memo: 'Tax payable' },
+          ],
+        });
+      });
     return { sent: true };
   }
 }

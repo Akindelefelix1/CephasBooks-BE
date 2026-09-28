@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.ts';
 import { assertBranch } from '../../common/branch-scope.ts';
 import type { UpdatePosReceiptSignaturesDto } from './dto/pos.dto.ts';
+import { postAutomaticJournal } from '../../common/automatic-accounting.ts';
 @Injectable()
 export class PosService {
   constructor(private readonly db: PrismaService) {}
@@ -428,25 +429,6 @@ export class PosService {
       quantity: Prisma.Decimal;
     }>,
   ) {
-    const accounts = [
-      ['1000', 'Cash and bank', 'ASSET'],
-      ['1100', 'Accounts receivable', 'ASSET'],
-      ['1300', 'Inventory', 'ASSET'],
-      ['2100', 'Tax payable', 'LIABILITY'],
-      ['4000', 'Sales revenue', 'INCOME'],
-      ['5300', 'Cost of goods sold', 'EXPENSE'],
-    ] as const;
-    for (const [code, name, type] of accounts)
-      await tx.ledgerAccount.upsert({
-        where: { organizationId_code: { organizationId: org, code } },
-        create: { organizationId: org, code, name, type },
-        update: {},
-      });
-    const ledger = await tx.ledgerAccount.findMany({
-      where: { organizationId: org, code: { in: accounts.map(([code]) => code) } },
-      select: { id: true, code: true },
-    });
-    const id = new Map(ledger.map((account) => [account.code, account.id]));
     const revenue = total.sub(tax),
       cash = total.sub(credit),
       cogs = items
@@ -455,41 +437,28 @@ export class PosService {
           (sum, item) => sum.add(item.product.costPrice.mul(item.quantity)),
           new Prisma.Decimal(0),
         );
-    const lines = [
-      { accountId: id.get('1000')!, debit: cash, credit: 0, memo: 'POS payment' },
-      { accountId: id.get('1100')!, debit: credit, credit: 0, memo: 'POS credit sale' },
-      { accountId: id.get('4000')!, debit: 0, credit: revenue, memo: 'POS revenue' },
-      { accountId: id.get('2100')!, debit: 0, credit: tax, memo: 'Output tax' },
-    ].filter(
-      (line) => new Prisma.Decimal(line.debit).gt(0) || new Prisma.Decimal(line.credit).gt(0),
-    );
-    await tx.journal.create({
-      data: {
-        organizationId: org,
-        number: `POS-${receipt}`,
-        journalDate: new Date(),
-        description: `POS sale ${receipt}`,
-        status: 'POSTED',
-        postedAt: new Date(),
-        lines,
-        total,
-      },
+    await postAutomaticJournal(tx, {
+      organizationId: org,
+      number: `POS-${receipt}`,
+      journalDate: new Date(),
+      description: `POS sale ${receipt}`,
+      lines: [
+        { accountCode: '1000', debit: cash, credit: 0, memo: 'POS payment' },
+        { accountCode: '1100', debit: credit, credit: 0, memo: 'POS credit sale' },
+        { accountCode: '4000', debit: 0, credit: revenue, memo: 'POS revenue' },
+        { accountCode: '2100', debit: 0, credit: tax, memo: 'Output tax' },
+      ],
     });
     if (cogs.gt(0))
-      await tx.journal.create({
-        data: {
-          organizationId: org,
-          number: `COGS-${receipt}`,
-          journalDate: new Date(),
-          description: `Inventory cost for POS sale ${receipt}`,
-          status: 'POSTED',
-          postedAt: new Date(),
-          lines: [
-            { accountId: id.get('5300')!, debit: cogs, credit: 0, memo: 'Cost of goods sold' },
-            { accountId: id.get('1300')!, debit: 0, credit: cogs, memo: 'Inventory issued' },
-          ],
-          total: cogs,
-        },
+      await postAutomaticJournal(tx, {
+        organizationId: org,
+        number: `COGS-${receipt}`,
+        journalDate: new Date(),
+        description: `Inventory cost for POS sale ${receipt}`,
+        lines: [
+          { accountCode: '5300', debit: cogs, credit: 0, memo: 'Cost of goods sold' },
+          { accountCode: '1300', debit: 0, credit: cogs, memo: 'Inventory issued' },
+        ],
       });
   }
   async returnItem(
@@ -501,7 +470,10 @@ export class PosService {
     return this.db.$transaction(async (tx) => {
       const sale = await tx.posSale.findFirst({
         where: { id: saleId, organizationId: org, status: 'COMPLETED' },
-        include: { items: true, returns: true },
+        include: {
+          items: { include: { product: { select: { costPrice: true, sku: true, type: true } } } },
+          returns: true,
+        },
       });
       if (!sale || !sale.warehouseId) throw new NotFoundException('Completed sale not found');
       const item = sale.items.find((x) => x.productId === data.productId);
@@ -512,6 +484,18 @@ export class PosService {
       if (returned.add(data.quantity).gt(item.quantity))
         throw new BadRequestException('Return quantity exceeds the quantity sold');
       const amount = new Prisma.Decimal(item.lineTotal).div(item.quantity).mul(data.quantity);
+      const returnedBase = amount.div(new Prisma.Decimal(1).add(item.taxRate.div(100)));
+      const returnedTax = amount.sub(returnedBase);
+      const originalMovement = await tx.stockMovement.findFirst({
+        where: {
+          organizationId: org,
+          reference: `${sale.receiptNumber}-${item.product.sku}`,
+        },
+        select: { unitCost: true },
+      });
+      const unitCost = originalMovement?.unitCost ?? item.product.costPrice;
+      const costReturned =
+        item.product.type === 'PRODUCT' ? unitCost.mul(data.quantity) : new Prisma.Decimal(0);
       const result = await tx.posReturn.create({
         data: {
           organizationId: org,
@@ -523,18 +507,32 @@ export class PosService {
           processedBy: actorId,
         },
       });
-      await tx.stockMovement.create({
-        data: {
-          organizationId: org,
-          productId: data.productId,
-          warehouseId: sale.warehouseId,
-          type: 'RECEIPT',
-          quantity: data.quantity,
-          unitCost: 0,
-          movementDate: new Date(),
-          reference: `RETURN-${sale.receiptNumber}-${result.id}`,
-          notes: data.reason,
-        },
+      if (item.product.type === 'PRODUCT')
+        await tx.stockMovement.create({
+          data: {
+            organizationId: org,
+            productId: data.productId,
+            warehouseId: sale.warehouseId,
+            type: 'RECEIPT',
+            quantity: data.quantity,
+            unitCost,
+            movementDate: new Date(),
+            reference: `RETURN-${sale.receiptNumber}-${result.id}`,
+            notes: data.reason,
+          },
+        });
+      await postAutomaticJournal(tx, {
+        organizationId: org,
+        number: `AUTO-POS-RETURN-${result.id}`,
+        journalDate: new Date(),
+        description: `POS return ${sale.receiptNumber}`,
+        lines: [
+          { accountCode: '4000', debit: returnedBase, credit: 0, memo: 'Sales return' },
+          { accountCode: '2100', debit: returnedTax, credit: 0, memo: 'Tax adjustment' },
+          { accountCode: '1000', debit: 0, credit: amount, memo: 'Customer refund' },
+          { accountCode: '1300', debit: costReturned, credit: 0, memo: 'Inventory returned' },
+          { accountCode: '5300', debit: 0, credit: costReturned, memo: 'Reverse cost of goods sold' },
+        ],
       });
       await tx.posAuditLog.create({
         data: {

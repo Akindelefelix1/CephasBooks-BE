@@ -8,6 +8,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.ts';
 import { assertBranch } from '../../common/branch-scope.ts';
+import { postAutomaticJournal, reverseAutomaticJournal } from '../../common/automatic-accounting.ts';
 import { WorkflowService } from '../workflow/workflow.service.ts';
 import {
   BillDto,
@@ -347,7 +348,35 @@ export class PurchasesService {
     };
     if (!allowed[x.status]?.includes(status))
       throw new BadRequestException('Invalid bill status transition');
-    return this.db.bill.update({ where: { id }, data: { status } });
+    return this.db.$transaction(async (tx) => {
+      const bill = await tx.bill.update({ where: { id }, data: { status } });
+      if (status === 'APPROVED')
+        await postAutomaticJournal(tx, {
+          organizationId: org,
+          number: `AUTO-BILL-${bill.id}`,
+          journalDate: bill.issueDate,
+          description: `Supplier bill ${bill.number}`,
+          lines: [
+            {
+              accountCode: '5000',
+              debit: bill.total.sub(bill.taxTotal),
+              credit: 0,
+              memo: 'Purchases',
+            },
+            { accountCode: '1150', debit: bill.taxTotal, credit: 0, memo: 'Tax receivable' },
+            { accountCode: '2000', debit: 0, credit: bill.total, memo: 'Accounts payable' },
+          ],
+        });
+      if (status === 'VOID')
+        await reverseAutomaticJournal(tx, {
+          organizationId: org,
+          number: `AUTO-BILL-${bill.id}`,
+          reversalNumber: `AUTO-REV-BILL-${bill.id}`,
+          journalDate: new Date(),
+          description: `Reverse supplier bill ${bill.number}`,
+        });
+      return bill;
+    });
   }
   payments(org: string, q: Record<string, string>) {
     return this.db.supplierPayment.findMany({
@@ -427,6 +456,16 @@ export class PurchasesService {
         where: { id: b.id },
         data: { paidAmount: paid, status: paid.gte(b.total) ? 'PAID' : 'PARTIALLY_PAID' },
       });
+      await postAutomaticJournal(tx, {
+        organizationId: org,
+        number: `AUTO-SUPPLIER-PAYMENT-${p.id}`,
+        journalDate: p.paymentDate,
+        description: `Supplier payment ${p.reference}`,
+        lines: [
+          { accountCode: '2000', debit: amount, credit: 0, memo: 'Accounts payable' },
+          { accountCode: '1000', debit: 0, credit: amount, memo: p.method },
+        ],
+      });
       return p;
     });
   }
@@ -436,6 +475,13 @@ export class PurchasesService {
         where: { id, organizationId: org, reversedAt: null },
       });
       if (!p) throw new NotFoundException('Supplier payment not found');
+      await reverseAutomaticJournal(tx, {
+        organizationId: org,
+        number: `AUTO-SUPPLIER-PAYMENT-${p.id}`,
+        reversalNumber: `AUTO-REV-SUPPLIER-PAYMENT-${p.id}`,
+        journalDate: new Date(),
+        description: `Reverse supplier payment ${p.reference}`,
+      });
       const b = await tx.bill.findUniqueOrThrow({ where: { id: p.billId } }),
         paid = b.paidAmount.sub(p.amount);
       await tx.supplierPayment.update({ where: { id }, data: { reversedAt: new Date() } });
@@ -523,7 +569,33 @@ export class PurchasesService {
           id,
           e.currency,
         );
+      if (status === 'APPROVED') {
+        const expenseAmount = e.amount.sub(e.taxAmount);
+        await postAutomaticJournal(tx, {
+          organizationId: org,
+          number: `AUTO-EXPENSE-${e.id}`,
+          journalDate: e.expenseDate,
+          description: `Expense ${e.reference}: ${e.merchant}`,
+          lines: [
+            { accountCode: '5100', debit: expenseAmount, credit: 0, memo: e.category },
+            { accountCode: '1150', debit: e.taxAmount, credit: 0, memo: 'Tax receivable' },
+            {
+              accountCode: e.bankAccountId ? '1000' : '2000',
+              debit: 0,
+              credit: e.amount,
+              memo: e.bankAccountId ? 'Bank payment' : 'Accounts payable',
+            },
+          ],
+        });
+      }
       if (status === 'VOID') {
+        await reverseAutomaticJournal(tx, {
+          organizationId: org,
+          number: `AUTO-EXPENSE-${e.id}`,
+          reversalNumber: `AUTO-REV-EXPENSE-${e.id}`,
+          journalDate: new Date(),
+          description: `Reverse expense ${e.reference}`,
+        });
         const bt = await tx.bankTransaction.findFirst({
           where: { organizationId: org, sourceType: 'EXPENSE', sourceId: id, reversedAt: null },
         });
