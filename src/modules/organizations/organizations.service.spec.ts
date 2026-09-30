@@ -1,4 +1,5 @@
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException, UnauthorizedException } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { jest } from '@jest/globals';
 import { OrganizationsService } from './organizations.service.ts';
 
@@ -126,5 +127,145 @@ describe('OrganizationsService onboarding', () => {
       ),
     ).rejects.toThrow('default currency must be selected and active');
     expect(transaction).not.toHaveBeenCalled();
+  });
+});
+
+describe('OrganizationsService account deletion', () => {
+  const owner = {
+    sub: 'owner-a',
+    email: 'owner@example.com',
+    organizationId: 'org-a',
+    role: 'OWNER',
+  };
+
+  it('sends a ten-minute deletion code to the registered owner email', async () => {
+    const update = jest.fn().mockResolvedValue({});
+    const send = jest.fn().mockResolvedValue(undefined);
+    const service = new OrganizationsService(
+      {
+        organization: {
+          findUniqueOrThrow: jest.fn().mockResolvedValue({
+            name: 'Acme Books',
+            deletionCodeSentAt: null,
+          }),
+          update,
+        },
+        user: {
+          findUniqueOrThrow: jest.fn().mockResolvedValue({ email: owner.email }),
+        },
+      } as never,
+      { send } as never,
+    );
+
+    await expect(service.requestDeletionCode(owner)).resolves.toEqual({
+      message: 'A deletion code has been sent to the registered email',
+      expiresIn: 600,
+    });
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({ to: owner.email, subject: 'Confirm deletion of Acme Books' }),
+    );
+    expect(update).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an invalid deletion code without starting deletion', async () => {
+    const transaction = jest.fn();
+    const update = jest.fn().mockResolvedValue({});
+    const service = new OrganizationsService({
+      organization: {
+        findUniqueOrThrow: jest.fn().mockResolvedValue({
+          deletionCodeHash: createHash('sha256').update('123456').digest('hex'),
+          deletionCodeExpiresAt: new Date(Date.now() + 60_000),
+          deletionCodeAttempts: 0,
+        }),
+        update,
+      },
+      $transaction: transaction,
+    } as never);
+
+    await expect(service.deleteOrganization(owner, '654321')).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+    expect(transaction).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledWith({
+      where: { id: owner.organizationId },
+      data: { deletionCodeAttempts: 1 },
+    });
+  });
+
+  it('deletes organization records transactionally and removes orphaned users', async () => {
+    const calls: string[] = [];
+    const delegates = [
+      'auditLog',
+      'posReturn',
+      'posSale',
+      'posShift',
+      'posRegister',
+      'posIdempotencyKey',
+      'posAuditLog',
+      'stockMovement',
+      'stockAdjustment',
+      'product',
+      'warehouse',
+      'paymentReceived',
+      'creditNote',
+      'quotation',
+      'invoice',
+      'customer',
+      'supplierPayment',
+      'bill',
+      'purchaseOrder',
+      'expense',
+      'purchaseRequest',
+      'supplier',
+      'bankTransaction',
+      'bankAccount',
+      'ledgerAccount',
+      'journal',
+      'financeRecord',
+      'project',
+    ];
+    const tx: Record<string, unknown> = {
+      membership: {
+        findMany: jest.fn().mockResolvedValue([{ userId: 'owner-a' }, { userId: 'staff-a' }]),
+      },
+      organization: {
+        delete: jest.fn().mockImplementation(() => {
+          calls.push('organization');
+          return Promise.resolve({});
+        }),
+      },
+      user: {
+        deleteMany: jest.fn().mockImplementation(() => {
+          calls.push('user');
+          return Promise.resolve({ count: 2 });
+        }),
+      },
+    };
+    for (const name of delegates) {
+      tx[name] = {
+        deleteMany: jest.fn().mockImplementation(() => {
+          calls.push(name);
+          return Promise.resolve({ count: 0 });
+        }),
+      };
+    }
+    const service = new OrganizationsService({
+      organization: {
+        findUniqueOrThrow: jest.fn().mockResolvedValue({
+          deletionCodeHash: createHash('sha256').update('123456').digest('hex'),
+          deletionCodeExpiresAt: new Date(Date.now() + 60_000),
+          deletionCodeAttempts: 0,
+        }),
+      },
+      $transaction: jest
+        .fn()
+        .mockImplementation((callback: (value: unknown) => unknown) =>
+          Promise.resolve(callback(tx)),
+        ),
+    } as never);
+
+    await expect(service.deleteOrganization(owner, '123456')).resolves.toEqual({ deleted: true });
+    expect(calls.at(-2)).toBe('organization');
+    expect(calls.at(-1)).toBe('user');
   });
 });

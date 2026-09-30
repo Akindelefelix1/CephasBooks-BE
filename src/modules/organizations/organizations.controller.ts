@@ -22,6 +22,7 @@ import {
   UpdateOrganizationUserDto,
 } from './dto/update-organization.dto.ts';
 import { OrganizationsService } from './organizations.service.ts';
+import { DeleteOrganizationDto } from './dto/delete-organization.dto.ts';
 
 @ApiTags('Organizations')
 @ApiBearerAuth()
@@ -40,6 +41,18 @@ export class OrganizationsController {
     @Body() dto: UpdateOrganizationDto,
   ) {
     return this.organizations.updateOrganization(user, dto);
+  }
+
+  @Roles(Role.OWNER)
+  @Post('deletion-code')
+  requestDeletionCode(@CurrentUser() user: AuthUser) {
+    return this.organizations.requestDeletionCode(user);
+  }
+
+  @Roles(Role.OWNER)
+  @Delete()
+  deleteOrganization(@CurrentUser() user: AuthUser, @Body() dto: DeleteOrganizationDto) {
+    return this.organizations.deleteOrganization(user, dto.code);
   }
 
   @Get('admin') admin(@CurrentUser() user: AuthUser) {

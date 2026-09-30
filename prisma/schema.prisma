@@ -243,6 +243,10 @@ model Organization {
   onboardingCompletedAt DateTime?
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
+  deletionCodeHash      String?
+  deletionCodeExpiresAt DateTime?
+  deletionCodeSentAt    DateTime?
+  deletionCodeAttempts  Int                  @default(0)
   memberships           Membership[]
   customRoles           CustomRole[]
   customers             Customer[]
@@ -432,6 +436,7 @@ model Product {
   costPrice          Decimal           @default(0) @db.Decimal(19, 4)
   taxRate            Decimal           @default(0) @db.Decimal(7, 4)
   reorderLevel       Decimal           @default(0) @db.Decimal(19, 4)
+  allowFractionalSale Boolean           @default(false)
   isActive           Boolean           @default(true)
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt

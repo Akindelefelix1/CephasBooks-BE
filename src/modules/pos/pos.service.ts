@@ -4,6 +4,22 @@ import { PrismaService } from '../../database/prisma.service.ts';
 import { assertBranch } from '../../common/branch-scope.ts';
 import type { UpdatePosReceiptSignaturesDto } from './dto/pos.dto.ts';
 import { postAutomaticJournal } from '../../common/automatic-accounting.ts';
+
+export function assertSaleQuantity(
+  product: { name?: string; allowFractionalSale: boolean },
+  rawQuantity: number | Prisma.Decimal,
+  action = 'sale',
+) {
+  const quantity = new Prisma.Decimal(rawQuantity);
+  const valid = product.allowFractionalSale ? quantity.mul(2).isInteger() : quantity.isInteger();
+  if (!valid) {
+    const increments = product.allowFractionalSale ? 'half-unit increments' : 'whole units';
+    throw new BadRequestException(
+      `${product.name ?? 'This product'} can only be processed in ${increments} for this ${action}`,
+    );
+  }
+}
+
 @Injectable()
 export class PosService {
   constructor(private readonly db: PrismaService) {}
@@ -197,6 +213,7 @@ export class PosService {
         taxTotal = new Prisma.Decimal(0);
       const items = data.items.map((line) => {
         const product = products.find((x) => x.id === line.productId)!;
+        assertSaleQuantity(product, line.quantity);
         const base = new Prisma.Decimal(product.salePrice).mul(line.quantity),
           discount = new Prisma.Decimal(line.discount || 0);
         const taxable = base.sub(discount),
@@ -471,13 +488,26 @@ export class PosService {
       const sale = await tx.posSale.findFirst({
         where: { id: saleId, organizationId: org, status: 'COMPLETED' },
         include: {
-          items: { include: { product: { select: { costPrice: true, sku: true, type: true } } } },
+          items: {
+            include: {
+              product: {
+                select: {
+                  costPrice: true,
+                  sku: true,
+                  type: true,
+                  name: true,
+                  allowFractionalSale: true,
+                },
+              },
+            },
+          },
           returns: true,
         },
       });
       if (!sale || !sale.warehouseId) throw new NotFoundException('Completed sale not found');
       const item = sale.items.find((x) => x.productId === data.productId);
       if (!item) throw new BadRequestException('Product was not sold on this receipt');
+      assertSaleQuantity(item.product, data.quantity, 'return');
       const returned = sale.returns
         .filter((x) => x.productId === data.productId)
         .reduce((sum, x) => sum.add(x.quantity), new Prisma.Decimal(0));
@@ -531,7 +561,12 @@ export class PosService {
           { accountCode: '2100', debit: returnedTax, credit: 0, memo: 'Tax adjustment' },
           { accountCode: '1000', debit: 0, credit: amount, memo: 'Customer refund' },
           { accountCode: '1300', debit: costReturned, credit: 0, memo: 'Inventory returned' },
-          { accountCode: '5300', debit: 0, credit: costReturned, memo: 'Reverse cost of goods sold' },
+          {
+            accountCode: '5300',
+            debit: 0,
+            credit: costReturned,
+            memo: 'Reverse cost of goods sold',
+          },
         ],
       });
       await tx.posAuditLog.create({
@@ -547,4 +582,5 @@ export class PosService {
       return result;
     });
   }
+
 }

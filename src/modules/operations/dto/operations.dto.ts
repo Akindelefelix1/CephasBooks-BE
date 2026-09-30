@@ -9,6 +9,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -20,11 +21,16 @@ export class ProductDto {
   @IsEnum(ItemType) type!: ItemType;
   @IsOptional() @IsString() category?: string;
   @IsOptional() @IsString() description?: string;
-  @IsOptional() @IsString() unit = 'unit';
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  @Matches(/[A-Za-z]/, { message: 'unit must be a name such as unit, kg, pack, or bottle' })
+  unit = 'unit';
   @Type(() => Number) @IsNumber() @Min(0) salePrice!: number;
   @Type(() => Number) @IsNumber() @Min(0) costPrice!: number;
   @Type(() => Number) @IsNumber() @Min(0) taxRate!: number;
   @Type(() => Number) @IsNumber() @Min(0) reorderLevel!: number;
+  @IsOptional() @IsBoolean() allowFractionalSale = false;
   @IsOptional() @IsUUID() defaultWarehouseId?: string;
   @IsOptional() @Type(() => Number) @IsNumber() @Min(0) openingQuantity?: number;
   @IsOptional() @IsUUID() openingWarehouseId?: string;

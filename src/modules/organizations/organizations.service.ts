@@ -1,9 +1,12 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
+  HttpStatus,
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { AuthUser } from '../../common/decorators/current-user.decorator.ts';
@@ -16,7 +19,7 @@ import type {
 import { PrismaService } from '../../database/prisma.service.ts';
 import { MailService } from '../mail/mail.service.ts';
 import * as argon2 from 'argon2';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomInt } from 'node:crypto';
 import { isISO4217CurrencyCode } from 'class-validator';
 
 const STEP_ORDER = ['business', 'financial', 'structure', 'tax', 'team'] as const;
@@ -55,6 +58,145 @@ export class OrganizationsService {
     private readonly prisma: PrismaService,
     private readonly mail?: MailService,
   ) {}
+
+  async requestDeletionCode(actor: AuthUser) {
+    const [organization, owner] = await Promise.all([
+      this.prisma.organization.findUniqueOrThrow({
+        where: { id: actor.organizationId },
+        select: { name: true, deletionCodeSentAt: true },
+      }),
+      this.prisma.user.findUniqueOrThrow({
+        where: { id: actor.sub },
+        select: { email: true },
+      }),
+    ]);
+    if (
+      organization.deletionCodeSentAt &&
+      Date.now() - organization.deletionCodeSentAt.getTime() < 60_000
+    ) {
+      throw new HttpException(
+        'Please wait before requesting another deletion code',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    const code = randomInt(100000, 1000000).toString();
+    const now = new Date();
+    if (!this.mail)
+      throw new ServiceUnavailableException(
+        'Email delivery is unavailable; please try again later',
+      );
+    await this.prisma.organization.update({
+      where: { id: actor.organizationId },
+      data: {
+        deletionCodeHash: this.hashToken(code),
+        deletionCodeExpiresAt: new Date(now.getTime() + 10 * 60_000),
+        deletionCodeSentAt: now,
+        deletionCodeAttempts: 0,
+      },
+    });
+    try {
+      await this.mail.send({
+        to: owner.email,
+        subject: `Confirm deletion of ${organization.name}`,
+        html: `<main style="max-width:600px;margin:auto;padding:32px;font-family:Arial,sans-serif;color:#172033"><h1>Delete ${this.escapeHtml(organization.name)}?</h1><p>Use this one-time verification code to permanently delete the organisation and all of its data:</p><p style="padding:16px;background:#fef2f2;border-radius:8px;font-size:28px;letter-spacing:6px;text-align:center"><strong>${code}</strong></p><p>This code expires in 10 minutes. If you did not request this, do not share the code.</p></main>`,
+      });
+    } catch {
+      await this.prisma.organization.updateMany({
+        where: { id: actor.organizationId, deletionCodeHash: this.hashToken(code) },
+        data: {
+          deletionCodeHash: null,
+          deletionCodeExpiresAt: null,
+          deletionCodeSentAt: null,
+          deletionCodeAttempts: 0,
+        },
+      });
+      throw new ServiceUnavailableException(
+        'The deletion code could not be delivered; please try again',
+      );
+    }
+    return { message: 'A deletion code has been sent to the registered email', expiresIn: 600 };
+  }
+
+  async deleteOrganization(actor: AuthUser, code: string) {
+    const organization = await this.prisma.organization.findUniqueOrThrow({
+      where: { id: actor.organizationId },
+      select: {
+        deletionCodeHash: true,
+        deletionCodeExpiresAt: true,
+        deletionCodeAttempts: true,
+      },
+    });
+    if (
+      organization.deletionCodeHash !== this.hashToken(code) ||
+      !organization.deletionCodeExpiresAt ||
+      organization.deletionCodeExpiresAt <= new Date()
+    ) {
+      const attempts = organization.deletionCodeAttempts + 1;
+      await this.prisma.organization.update({
+        where: { id: actor.organizationId },
+        data:
+          attempts >= 5
+            ? {
+                deletionCodeHash: null,
+                deletionCodeExpiresAt: null,
+                deletionCodeAttempts: attempts,
+              }
+            : { deletionCodeAttempts: attempts },
+      });
+      throw new UnauthorizedException('The deletion code is invalid or has expired');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      const organizationId = actor.organizationId;
+      const memberships = await tx.membership.findMany({
+        where: { organizationId },
+        select: { userId: true },
+      });
+      const userIds = memberships.map(({ userId }) => userId);
+
+      await tx.auditLog.deleteMany({ where: { organizationId } });
+      await tx.posReturn.deleteMany({ where: { organizationId } });
+      await tx.posSale.deleteMany({ where: { organizationId } });
+      await tx.posShift.deleteMany({ where: { organizationId } });
+      await tx.posRegister.deleteMany({ where: { organizationId } });
+      await tx.posIdempotencyKey.deleteMany({ where: { organizationId } });
+      await tx.posAuditLog.deleteMany({ where: { organizationId } });
+      await tx.stockMovement.deleteMany({ where: { organizationId } });
+      await tx.stockAdjustment.deleteMany({ where: { organizationId } });
+      await tx.product.deleteMany({ where: { organizationId } });
+      await tx.warehouse.deleteMany({ where: { organizationId } });
+      await tx.paymentReceived.deleteMany({ where: { organizationId } });
+      await tx.creditNote.deleteMany({ where: { organizationId } });
+      await tx.quotation.deleteMany({ where: { organizationId } });
+      await tx.invoice.deleteMany({ where: { organizationId } });
+      await tx.customer.deleteMany({ where: { organizationId } });
+      await tx.supplierPayment.deleteMany({ where: { organizationId } });
+      await tx.bill.deleteMany({ where: { organizationId } });
+      await tx.purchaseOrder.deleteMany({ where: { organizationId } });
+      await tx.expense.deleteMany({ where: { organizationId } });
+      await tx.purchaseRequest.deleteMany({ where: { organizationId } });
+      await tx.supplier.deleteMany({ where: { organizationId } });
+      await tx.bankTransaction.deleteMany({ where: { organizationId } });
+      await tx.bankAccount.deleteMany({ where: { organizationId } });
+      await tx.ledgerAccount.deleteMany({ where: { organizationId } });
+      await tx.journal.deleteMany({ where: { organizationId } });
+      await tx.financeRecord.deleteMany({ where: { organizationId } });
+      await tx.project.deleteMany({ where: { organizationId } });
+      await tx.organization.delete({ where: { id: organizationId } });
+
+      if (userIds.length) {
+        await tx.user.deleteMany({
+          where: { id: { in: userIds }, memberships: { none: {} } },
+        });
+      }
+    });
+    return { deleted: true };
+  }
+
+  private hashToken(token: string) {
+    return createHash('sha256').update(token).digest('hex');
+  }
 
   async admin(organizationId: string) {
     const organization = await this.prisma.organization.findUniqueOrThrow({
