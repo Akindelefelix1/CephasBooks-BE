@@ -33,6 +33,7 @@ export class ProductDto {
   @IsOptional() @IsBoolean() allowFractionalSale = false;
   @IsOptional() @IsUUID() defaultWarehouseId?: string;
   @IsOptional() @Type(() => Number) @IsNumber() @Min(0) openingQuantity?: number;
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) availableQuantity?: number;
   @IsOptional() @IsUUID() openingWarehouseId?: string;
 }
 

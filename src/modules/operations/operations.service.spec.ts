@@ -215,6 +215,85 @@ describe('OperationsService', () => {
     );
   });
 
+  it('sets an exact available quantity through a traceable stock adjustment', async () => {
+    const adjustmentCreate = jest.fn().mockResolvedValue({
+      id: 'adjustment-a',
+      reason: 'Available stock corrected from product edit',
+    });
+    const movementCreate = jest.fn().mockResolvedValue({});
+    const tx = {
+      product: {
+        update: jest.fn().mockResolvedValue({
+          id: 'product-a',
+          sku: 'FABRIC-1',
+          name: 'Fabric',
+          type: 'PRODUCT',
+          costPrice: new Prisma.Decimal(0),
+        }),
+      },
+      stockMovement: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            productId: 'product-a',
+            warehouseId: 'warehouse-a',
+            type: 'RECEIPT',
+            quantity: new Prisma.Decimal(4000),
+            unitCost: new Prisma.Decimal(0),
+          },
+        ]),
+        create: movementCreate,
+      },
+      stockAdjustment: { create: adjustmentCreate },
+    };
+    const service = new OperationsService({
+      product: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'product-a',
+          type: 'PRODUCT',
+          allowFractionalSale: false,
+        }),
+      },
+      warehouse: { findFirst: jest.fn().mockResolvedValue({ id: 'warehouse-a' }) },
+      $transaction: jest
+        .fn()
+        .mockImplementation((operation: (client: typeof tx) => unknown) => operation(tx)),
+    } as never);
+
+    await service.updateProduct('org-a', 'product-a', {
+      sku: 'FABRIC-1',
+      name: 'Fabric',
+      type: 'PRODUCT',
+      unit: 'yard',
+      salePrice: 5000,
+      costPrice: 0,
+      taxRate: 0,
+      reorderLevel: 20,
+      allowFractionalSale: false,
+      defaultWarehouseId: 'warehouse-a',
+      availableQuantity: 25,
+    });
+
+    expect(adjustmentCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        // Jest's asymmetric matcher is intentionally dynamic.
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        data: expect.objectContaining({
+          productId: 'product-a',
+          warehouseId: 'warehouse-a',
+          quantityDelta: new Prisma.Decimal(-3975),
+          status: 'APPROVED',
+        }),
+      }),
+    );
+    expect(movementCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        // Jest's asymmetric matcher is intentionally dynamic.
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        data: expect.objectContaining({ quantity: new Prisma.Decimal(-3975) }),
+      }),
+    );
+  });
+
   it('only permits approval or void as draft adjustment transitions', async () => {
     const service = new OperationsService({
       stockAdjustment: {

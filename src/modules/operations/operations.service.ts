@@ -209,7 +209,14 @@ export class OperationsService {
   }
 
   async createProduct(org: string, d: ProductDto, actor?: AuthUser) {
-    const { openingQuantity = 0, openingWarehouseId, defaultWarehouseId, ...productData } = d;
+    const {
+      openingQuantity = 0,
+      availableQuantity: _availableQuantity,
+      openingWarehouseId,
+      defaultWarehouseId,
+      ...productData
+    } = d;
+    void _availableQuantity;
     const stockWarehouseId = defaultWarehouseId ?? openingWarehouseId;
     if (openingQuantity > 0 && !stockWarehouseId)
       throw new BadRequestException('Select a warehouse for opening stock');
@@ -265,9 +272,10 @@ export class OperationsService {
     });
   }
   async updateProduct(org: string, id: string, d: ProductDto, actor?: AuthUser) {
-    await this.product(org, id);
+    const current = await this.product(org, id);
     const {
       openingQuantity: _openingQuantity,
+      availableQuantity,
       openingWarehouseId: _openingWarehouseId,
       defaultWarehouseId,
       ...productData
@@ -280,11 +288,94 @@ export class OperationsService {
       });
       if (!warehouse) throw new BadRequestException('Selected stock warehouse is unavailable');
     }
+    if (availableQuantity !== undefined && current.type === 'PRODUCT' && !defaultWarehouseId)
+      throw new BadRequestException('Select a default warehouse before setting available stock');
+    if (availableQuantity !== undefined) {
+      const quantity = new Prisma.Decimal(availableQuantity);
+      const allowsHalves = d.allowFractionalSale ?? current.allowFractionalSale;
+      const valid = allowsHalves ? quantity.mul(2).isInteger() : quantity.isInteger();
+      if (!valid)
+        throw new BadRequestException(
+          allowsHalves
+            ? 'Available quantity must use half-unit increments'
+            : 'Available quantity must be a whole number',
+        );
+    }
     return this.db.$transaction(async (tx) => {
       const updated = await tx.product.update({
         where: { id },
         data: { ...productData, defaultWarehouseId: defaultWarehouseId || null },
       });
+      if (availableQuantity !== undefined && updated.type === 'PRODUCT' && defaultWarehouseId) {
+        const rows = await tx.stockMovement.findMany({
+          where: { organizationId: org, productId: id },
+          select: {
+            productId: true,
+            warehouseId: true,
+            type: true,
+            quantity: true,
+            unitCost: true,
+          },
+        });
+        const existing = this.stockMap(rows).get(id) ?? new Prisma.Decimal(0);
+        const target = new Prisma.Decimal(availableQuantity);
+        const delta = target.sub(existing);
+        if (!delta.isZero()) {
+          const warehouseStock = this.stockMap(
+            rows.filter((row) => row.warehouseId === defaultWarehouseId),
+          ).get(id) ?? new Prisma.Decimal(0);
+          if (delta.lt(0) && warehouseStock.lt(delta.abs()))
+            throw new BadRequestException(
+              `The default warehouse only has ${warehouseStock.toString()} available. Transfer stock into it or adjust each warehouse separately.`,
+            );
+          const reference = `COUNT-${updated.sku}-${randomUUID()}`;
+          const now = new Date();
+          const adjustment = await tx.stockAdjustment.create({
+            data: {
+              organizationId: org,
+              productId: id,
+              warehouseId: defaultWarehouseId,
+              reference,
+              adjustmentDate: now,
+              quantityDelta: delta,
+              unitCost: updated.costPrice,
+              reason: 'Available stock corrected from product edit',
+              status: 'APPROVED',
+            },
+          });
+          await tx.stockMovement.create({
+            data: {
+              organizationId: org,
+              productId: id,
+              warehouseId: defaultWarehouseId,
+              type: 'ADJUSTMENT',
+              quantity: delta,
+              unitCost: updated.costPrice,
+              movementDate: now,
+              reference: `ADJ-${reference}`,
+              notes: adjustment.reason,
+            },
+          });
+          const value = delta.abs().mul(updated.costPrice);
+          if (value.gt(0))
+            await postAutomaticJournal(tx, {
+              organizationId: org,
+              number: `AUTO-STOCK-COUNT-${adjustment.id}`,
+              journalDate: now,
+              description: `Stock count correction for ${updated.sku}`,
+              lines:
+                delta.gt(0)
+                  ? [
+                      { accountCode: '1300', debit: value, credit: 0, memo: updated.name },
+                      { accountCode: '4900', debit: 0, credit: value, memo: adjustment.reason },
+                    ]
+                  : [
+                      { accountCode: '5900', debit: value, credit: 0, memo: adjustment.reason },
+                      { accountCode: '1300', debit: 0, credit: value, memo: updated.name },
+                    ],
+            });
+        }
+      }
       if (actor)
         await tx.auditLog.create({
           data: {
