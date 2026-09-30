@@ -217,6 +217,20 @@ export class OperationsService {
       ...productData
     } = d;
     void _availableQuantity;
+    if (d.type === 'SERVICE' && openingQuantity > 0)
+      throw new BadRequestException('Services cannot have opening stock');
+    if (openingQuantity > 0) {
+      const quantity = new Prisma.Decimal(openingQuantity);
+      const valid = d.allowFractionalSale
+        ? quantity.mul(2).isInteger()
+        : quantity.isInteger();
+      if (!valid)
+        throw new BadRequestException(
+          d.allowFractionalSale
+            ? 'Opening quantity must use half-unit increments'
+            : 'Opening quantity must be a whole number',
+        );
+    }
     const stockWarehouseId = defaultWarehouseId ?? openingWarehouseId;
     if (openingQuantity > 0 && !stockWarehouseId)
       throw new BadRequestException('Select a warehouse for opening stock');
@@ -282,6 +296,8 @@ export class OperationsService {
     } = d;
     void _openingQuantity;
     void _openingWarehouseId;
+    if (d.type !== current.type)
+      throw new BadRequestException('Item type cannot be changed after creation');
     if (defaultWarehouseId) {
       const warehouse = await this.db.warehouse.findFirst({
         where: { id: defaultWarehouseId, organizationId: org, isActive: true },

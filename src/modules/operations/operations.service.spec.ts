@@ -4,6 +4,25 @@ import { jest } from '@jest/globals';
 import { OperationsService } from './operations.service.ts';
 
 describe('OperationsService', () => {
+  it('rejects opening stock for a service', async () => {
+    const transaction = jest.fn();
+    const service = new OperationsService({ $transaction: transaction } as never);
+    await expect(
+      service.createProduct('org-a', {
+        sku: 'CONSULTING',
+        name: 'Consulting',
+        type: 'SERVICE',
+        unit: 'hour',
+        salePrice: 100,
+        costPrice: 0,
+        taxRate: 0,
+        reorderLevel: 0,
+        openingQuantity: 4,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
   it('rejects stock movements for services', async () => {
     const service = new OperationsService({
       product: { findFirst: jest.fn().mockResolvedValue({ id: 'product', type: 'SERVICE' }) },
