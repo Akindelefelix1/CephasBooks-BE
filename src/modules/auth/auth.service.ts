@@ -99,7 +99,7 @@ export class AuthService {
     return this.issueTokens(user.id, user.email, membership.organizationId, membership.role);
   }
 
-  async getProfile(userId: string, organizationId: string, role: string) {
+  async getProfile(userId: string, organizationId: string, role: string, customRoleId?: string, permissions: string[] = []) {
     const [user, organization] = await Promise.all([
       this.prisma.user.findUniqueOrThrow({
         where: { id: userId },
@@ -110,10 +110,10 @@ export class AuthService {
         select: { name: true, baseCurrency: true, countryCode: true },
       }),
     ]);
-    return { ...user, role, organization };
+    return { ...user, role, customRoleId, permissions, organization };
   }
 
-  async updateProfile(userId: string, organizationId: string, role: string, dto: UpdateProfileDto) {
+  async updateProfile(userId: string, organizationId: string, role: string, dto: UpdateProfileDto, customRoleId?: string, permissions: string[] = []) {
     const profile = await this.prisma.user.update({
       where: { id: userId },
       data: {
@@ -135,7 +135,7 @@ export class AuthService {
       where: { id: organizationId },
       select: { name: true, baseCurrency: true, countryCode: true },
     });
-    return { ...profile, role, organization };
+    return { ...profile, role, customRoleId, permissions, organization };
   }
 
   async changePassword(userId: string, dto: ChangePasswordDto) {

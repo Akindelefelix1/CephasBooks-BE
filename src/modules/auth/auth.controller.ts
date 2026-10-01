@@ -35,13 +35,13 @@ export class AuthController {
     return this.auth.logout(dto.refreshToken);
   }
   @ApiBearerAuth() @UseGuards(AuthGuard('jwt')) @Get('me') me(@CurrentUser() user: AuthUser) {
-    return this.auth.getProfile(user.sub, user.organizationId, user.role);
+    return this.auth.getProfile(user.sub, user.organizationId, user.role, user.customRoleId, user.permissions);
   }
   @ApiBearerAuth() @UseGuards(AuthGuard('jwt')) @Patch('me') updateProfile(
     @CurrentUser() user: AuthUser,
     @Body() dto: UpdateProfileDto,
   ) {
-    return this.auth.updateProfile(user.sub, user.organizationId, user.role, dto);
+    return this.auth.updateProfile(user.sub, user.organizationId, user.role, dto, user.customRoleId, user.permissions);
   }
   @ApiBearerAuth() @UseGuards(AuthGuard('jwt')) @Patch('password') changePassword(
     @CurrentUser() user: AuthUser,

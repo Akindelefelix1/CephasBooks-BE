@@ -132,7 +132,7 @@ describe('OrganizationsService onboarding', () => {
   it('removes a staff membership and deletes an orphaned invited account', async () => {
     const membershipDelete = jest.fn().mockResolvedValue({});
     const userDelete = jest.fn().mockResolvedValue({});
-    const transaction = jest.fn().mockImplementation(async (callback: (tx: unknown) => unknown) =>
+    const transaction = jest.fn().mockImplementation((callback: (tx: unknown) => unknown) =>
       callback({
         auditLog: { create: jest.fn().mockResolvedValue({}) },
         appNotification: { create: jest.fn().mockResolvedValue({}) },

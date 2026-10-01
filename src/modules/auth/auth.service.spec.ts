@@ -67,7 +67,7 @@ describe('AuthService', () => {
     ).resolves.toMatchObject({ accessToken: 'access-token', refreshToken: 'refresh-token' });
     expect(update).toHaveBeenCalledWith({
       where: { id: 'invited-user' },
-      data: { verifiedAt: expect.any(Date) },
+      data: { verifiedAt: expect.any(Date) as Date },
     });
   });
 
