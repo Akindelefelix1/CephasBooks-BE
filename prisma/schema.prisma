@@ -231,6 +231,7 @@ model User {
   auditLogs                 AuditLog[]
   notificationReceipts      NotificationReceipt[]
   bankTransactionReversals  BankTransaction[]     @relation("BankTransactionReversedBy")
+  assignedPosRegisters      PosRegister[]          @relation("PosRegisterAssignedStaff")
 }
 
 model Organization {
@@ -518,6 +519,7 @@ model PosRegister {
   id             String       @id @default(uuid()) @db.Uuid
   organizationId String       @db.Uuid
   warehouseId    String       @db.Uuid
+  assignedStaffId String?      @db.Uuid
   code           String
   name           String
   isActive       Boolean      @default(true)
@@ -525,11 +527,13 @@ model PosRegister {
   updatedAt      DateTime     @updatedAt
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   warehouse      Warehouse    @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  assignedStaff  User?        @relation("PosRegisterAssignedStaff", fields: [assignedStaffId], references: [id], onDelete: SetNull)
   shifts         PosShift[]
   sales          PosSale[]
 
   @@unique([organizationId, code])
   @@index([organizationId, warehouseId, isActive])
+  @@index([organizationId, assignedStaffId, isActive])
 }
 
 model PosShift {

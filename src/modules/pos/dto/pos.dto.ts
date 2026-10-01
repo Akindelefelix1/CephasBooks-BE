@@ -74,8 +74,12 @@ export class CloseShiftDto {
 }
 export class CreateRegisterDto {
   @IsUUID() warehouseId!: string;
+  @IsUUID() assignedStaffId!: string;
   @IsString() @MaxLength(32) code!: string;
   @IsString() @MaxLength(120) name!: string;
+}
+export class AssignRegisterStaffDto {
+  @IsUUID() assignedStaffId!: string;
 }
 export class ReturnPosSaleDto {
   @IsUUID() productId!: string;

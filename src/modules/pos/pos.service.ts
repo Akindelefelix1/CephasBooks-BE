@@ -73,10 +73,17 @@ export class PosService {
       meta: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
     };
   }
-  registers(org: string) {
+  registers(org: string, staffId: string, role: string) {
     return this.db.posRegister.findMany({
-      where: { organizationId: org, isActive: true },
-      include: { warehouse: true },
+      where: {
+        organizationId: org,
+        isActive: true,
+        ...(!['OWNER', 'ADMIN'].includes(role) ? { assignedStaffId: staffId } : {}),
+      },
+      include: {
+        warehouse: true,
+        assignedStaff: { select: { id: true, email: true, firstName: true, lastName: true } },
+      },
       orderBy: { code: 'asc' },
     });
   }
@@ -95,12 +102,49 @@ export class PosService {
       include: { items: true, payments: true, customer: true },
     });
   }
-  async createRegister(org: string, data: { warehouseId: string; code: string; name: string }) {
-    const warehouse = await this.db.warehouse.findFirst({
-      where: { id: data.warehouseId, organizationId: org, isActive: true },
-    });
+  async createRegister(
+    org: string,
+    data: { warehouseId: string; assignedStaffId: string; code: string; name: string },
+  ) {
+    const [warehouse, membership] = await Promise.all([
+      this.db.warehouse.findFirst({
+        where: { id: data.warehouseId, organizationId: org, isActive: true },
+      }),
+      this.db.membership.findFirst({
+        where: {
+          organizationId: org,
+          userId: data.assignedStaffId,
+          user: { isActive: true },
+        },
+      }),
+    ]);
     if (!warehouse) throw new BadRequestException('Select an active warehouse for this register');
-    return this.db.posRegister.create({ data: { ...data, organizationId: org } });
+    if (!membership) throw new BadRequestException('Select an active staff member for this register');
+    return this.db.posRegister.create({
+      data: { ...data, organizationId: org },
+      include: {
+        warehouse: true,
+        assignedStaff: { select: { id: true, email: true, firstName: true, lastName: true } },
+      },
+    });
+  }
+  async assignRegisterStaff(org: string, registerId: string, assignedStaffId: string) {
+    const [register, membership] = await Promise.all([
+      this.db.posRegister.findFirst({ where: { id: registerId, organizationId: org, isActive: true } }),
+      this.db.membership.findFirst({
+        where: { organizationId: org, userId: assignedStaffId, user: { isActive: true } },
+      }),
+    ]);
+    if (!register) throw new NotFoundException('Active register not found');
+    if (!membership) throw new BadRequestException('Select an active staff member for this register');
+    return this.db.posRegister.update({
+      where: { id: register.id },
+      data: { assignedStaffId },
+      include: {
+        warehouse: true,
+        assignedStaff: { select: { id: true, email: true, firstName: true, lastName: true } },
+      },
+    });
   }
   currentShift(org: string, cashierId: string) {
     return this.db.posShift.findFirst({
@@ -118,6 +162,10 @@ export class PosService {
       where: { id: data.registerId, organizationId: org, isActive: true },
     });
     if (!register) throw new NotFoundException('Active register not found');
+    if (!register.assignedStaffId)
+      throw new BadRequestException('Assign this register to an active staff member first');
+    if (register.assignedStaffId !== cashierId)
+      throw new BadRequestException('This register is assigned to another staff member');
     const existing = await this.db.posShift.findFirst({
       where: { registerId: register.id, status: 'OPEN' },
     });
@@ -198,6 +246,8 @@ export class PosService {
         throw new BadRequestException(
           'Open a cashier shift on an active register before completing a sale',
         );
+      if (shift.register.assignedStaffId !== cashierId)
+        throw new BadRequestException('This register is not assigned to the signed-in staff member');
       const warehouse = shift.register.warehouse;
       const products = await tx.product.findMany({
         where: {
