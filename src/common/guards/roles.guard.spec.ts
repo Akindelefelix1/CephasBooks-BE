@@ -38,4 +38,15 @@ describe('RolesGuard custom permissions', () => {
     expect(guard.canActivate(context(['sales.view'], 'GET'))).toBe(true);
     expect(guard.canActivate(context([], 'GET'))).toBe(false);
   });
+
+  it('allows staff to read onboarding completion state after login', () => {
+    const reflector = { getAllAndOverride: jest.fn().mockReturnValue(undefined) };
+    const guard = new RolesGuard(reflector as unknown as Reflector);
+
+    expect(
+      guard.canActivate(
+        context([], 'GET', '/api/v1/organizations/current/onboarding'),
+      ),
+    ).toBe(true);
+  });
 });

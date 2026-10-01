@@ -33,6 +33,11 @@ export class RolesGuard implements CanActivate {
       return method === 'GET' ? 'reports.view' : 'reports.export';
     if (/\/workflow\/approvals(?:\/|\?|$)/.test(url)) return 'approvals.review';
     if (/\/organizations\/current\/(users|roles)(?:\/|\?|$)/.test(url)) return `users.${action}`;
+    // Every authenticated member needs the completed/onboarding state after
+    // login. Mutating onboarding routes remain protected by their @Roles
+    // decorators and the settings permission below.
+    if (method === 'GET' && /\/organizations\/current\/onboarding(?:\/|\?|$)/.test(url))
+      return null;
     if (/\/organizations\/current(?:\/|\?|$)/.test(url)) return 'settings.manage';
     return null;
   }
