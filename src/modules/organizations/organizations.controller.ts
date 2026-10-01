@@ -86,6 +86,13 @@ export class OrganizationsController {
     return this.organizations.updateUser(user, id, dto);
   }
 
+  @Roles(Role.OWNER, Role.ADMIN) @Delete('users/:id') deleteUser(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+  ) {
+    return this.organizations.deleteUser(user, id);
+  }
+
   @Roles(Role.OWNER, Role.ADMIN, Role.AUDITOR) @Get('roles') roles(@CurrentUser() user: AuthUser) {
     return this.organizations.roles(user.organizationId);
   }

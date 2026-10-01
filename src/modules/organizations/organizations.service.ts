@@ -556,6 +556,43 @@ export class OrganizationsService {
     });
   }
 
+  async deleteUser(actor: AuthUser, id: string) {
+    const membership = await this.prisma.membership.findFirst({
+      where: { id, organizationId: actor.organizationId },
+      include: { user: true },
+    });
+    if (!membership) throw new NotFoundException('Organisation user not found');
+    if (membership.role === 'OWNER')
+      throw new BadRequestException('The organisation owner cannot be removed');
+    if (membership.userId === actor.sub)
+      throw new BadRequestException('You cannot remove your own account');
+
+    await this.prisma.$transaction(async (tx) => {
+      await this.recordActivity(
+        tx,
+        actor,
+        'USER_REMOVED',
+        'Membership',
+        membership.id,
+        'User removed',
+        `${membership.user.email} was removed from the organisation.`,
+      );
+      await tx.membership.delete({ where: { id: membership.id } });
+      const remainingMemberships = await tx.membership.count({
+        where: { userId: membership.userId },
+      });
+      if (remainingMemberships === 0) {
+        await tx.user.delete({ where: { id: membership.userId } });
+      } else {
+        await tx.session.updateMany({
+          where: { userId: membership.userId, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+      }
+    });
+    return { deleted: true as const };
+  }
+
   roles(organizationId: string) {
     return this.prisma.customRole.findMany({
       where: { organizationId },

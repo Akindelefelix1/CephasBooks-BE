@@ -109,6 +109,63 @@ describe('OrganizationsService onboarding', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('prevents the organisation owner from being removed', async () => {
+    const service = new OrganizationsService({
+      membership: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'membership-a',
+          userId: 'owner-a',
+          role: 'OWNER',
+          user: { email: 'owner@example.com' },
+        }),
+      },
+    } as never);
+
+    await expect(
+      service.deleteUser(
+        { sub: 'admin-a', email: 'admin@example.com', organizationId: 'org-a', role: 'ADMIN' },
+        'membership-a',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('removes a staff membership and deletes an orphaned invited account', async () => {
+    const membershipDelete = jest.fn().mockResolvedValue({});
+    const userDelete = jest.fn().mockResolvedValue({});
+    const transaction = jest.fn().mockImplementation(async (callback: (tx: unknown) => unknown) =>
+      callback({
+        auditLog: { create: jest.fn().mockResolvedValue({}) },
+        appNotification: { create: jest.fn().mockResolvedValue({}) },
+        membership: {
+          delete: membershipDelete,
+          count: jest.fn().mockResolvedValue(0),
+        },
+        user: { delete: userDelete },
+        session: { updateMany: jest.fn().mockResolvedValue({}) },
+      }),
+    );
+    const service = new OrganizationsService({
+      membership: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'membership-a',
+          userId: 'staff-a',
+          role: 'MEMBER',
+          user: { email: 'staff@example.com' },
+        }),
+      },
+      $transaction: transaction,
+    } as never);
+
+    await expect(
+      service.deleteUser(
+        { sub: 'owner-a', email: 'owner@example.com', organizationId: 'org-a', role: 'OWNER' },
+        'membership-a',
+      ),
+    ).resolves.toEqual({ deleted: true });
+    expect(membershipDelete).toHaveBeenCalledWith({ where: { id: 'membership-a' } });
+    expect(userDelete).toHaveBeenCalledWith({ where: { id: 'staff-a' } });
+  });
+
   it('rejects a default currency that is not active in the selected list', async () => {
     const transaction = jest.fn();
     const service = new OrganizationsService({ $transaction: transaction } as never);
