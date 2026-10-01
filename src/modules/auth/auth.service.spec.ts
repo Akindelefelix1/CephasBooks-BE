@@ -25,6 +25,52 @@ describe('AuthService', () => {
     ).rejects.toThrow('Invalid credentials');
   });
 
+  it('allows a legacy invited user to sign in with their temporary password', async () => {
+    const passwordHash = await import('argon2').then(({ hash }) => hash('Temporary!123'));
+    const update = jest.fn().mockResolvedValue({});
+    const service = new AuthService(
+      {
+        user: {
+          findUnique: jest.fn().mockResolvedValue({
+            id: 'invited-user',
+            email: 'staff@example.com',
+            passwordHash,
+            isActive: true,
+            verifiedAt: null,
+            mustChangePassword: true,
+            memberships: [{ organizationId: 'org-a', role: 'MEMBER' }],
+          }),
+          update,
+        },
+        session: {
+          create: jest.fn().mockResolvedValue({ id: 'session-a' }),
+          update: jest.fn().mockResolvedValue({}),
+        },
+      } as never,
+      {
+        signAsync: jest
+          .fn()
+          .mockResolvedValueOnce('access-token')
+          .mockResolvedValueOnce('refresh-token'),
+      } as never,
+      {
+        getOrThrow: jest.fn().mockReturnValue('test-secret'),
+        get: jest.fn().mockImplementation((key: string) =>
+          key === 'JWT_ACCESS_TTL' ? '15m' : '7d',
+        ),
+      } as never,
+      {} as never,
+    );
+
+    await expect(
+      service.login({ email: 'staff@example.com', password: 'Temporary!123' }),
+    ).resolves.toMatchObject({ accessToken: 'access-token', refreshToken: 'refresh-token' });
+    expect(update).toHaveBeenCalledWith({
+      where: { id: 'invited-user' },
+      data: { verifiedAt: expect.any(Date) },
+    });
+  });
+
   it('rejects an incorrect email verification code', async () => {
     const service = new AuthService(
       {

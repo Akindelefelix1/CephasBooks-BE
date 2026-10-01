@@ -413,10 +413,15 @@ export class OrganizationsService {
       return membership;
     });
     try {
+      const appUrl = (process.env.FRONTEND_URL ?? 'https://cephas-books.onrender.com').replace(
+        /\/+$/,
+        '',
+      );
+      const loginUrl = `${appUrl}/login?email=${encodeURIComponent(email)}`;
       await this.mail?.send({
         to: email,
         subject: `You have been invited to ${organization.name} on Cephas Books`,
-        html: `<main style="max-width:600px;margin:auto;padding:32px;font-family:Arial,sans-serif;color:#172033"><h1>Welcome to ${this.escapeHtml(organization.name)}</h1><p>${this.escapeHtml(dto.firstName || 'Hello')}, your staff access has been created.</p>${temporaryPassword ? `<p>Sign in with <strong>${this.escapeHtml(email)}</strong> and this temporary password:</p><p style="padding:16px;background:#f1f5f9;border-radius:8px;font-size:18px"><strong>${this.escapeHtml(temporaryPassword)}</strong></p><p>Change this password immediately after signing in.</p>` : '<p>Your existing Cephas Books account now has access to this organisation.</p>'}</main>`,
+        html: `<main style="max-width:600px;margin:auto;padding:32px;font-family:Arial,sans-serif;color:#172033"><h1>Welcome to ${this.escapeHtml(organization.name)}</h1><p>${this.escapeHtml(dto.firstName || 'Hello')}, your staff access has been created.</p>${temporaryPassword ? `<p>Sign in with <strong>${this.escapeHtml(email)}</strong> and this temporary password:</p><p style="padding:16px;background:#f1f5f9;border-radius:8px;font-size:18px"><strong>${this.escapeHtml(temporaryPassword)}</strong></p><p>Change this password immediately after signing in.</p>` : '<p>Your existing Cephas Books account now has access to this organisation.</p>'}<p style="margin-top:24px"><a href="${this.escapeHtml(loginUrl)}" style="display:inline-block;padding:12px 20px;background:#172033;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700">Sign in to Cephas Books</a></p><p style="font-size:13px;color:#64748b">Or open: <a href="${this.escapeHtml(loginUrl)}">${this.escapeHtml(loginUrl)}</a></p></main>`,
       });
     } catch {
       // Do not leave an inaccessible staff account behind when credential delivery fails.

@@ -85,7 +85,17 @@ export class AuthService {
     const valid = user && user.isActive && (await argon2.verify(user.passwordHash, dto.password));
     const membership = user?.memberships[0];
     if (!valid || !user || !membership) throw new UnauthorizedException('Invalid credentials');
-    if (!user.verifiedAt) throw new ForbiddenException('Email verification required');
+    if (!user.verifiedAt && !user.mustChangePassword)
+      throw new ForbiddenException('Email verification required');
+    // Receiving and using an invitation's temporary password proves access to the
+    // invited mailbox. This also repairs invitees created before invitations were
+    // stored as verified accounts.
+    if (!user.verifiedAt) {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { verifiedAt: new Date() },
+      });
+    }
     return this.issueTokens(user.id, user.email, membership.organizationId, membership.role);
   }
 
