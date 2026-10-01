@@ -520,6 +520,7 @@ model PosRegister {
   organizationId String       @db.Uuid
   warehouseId    String       @db.Uuid
   assignedStaffId String?      @db.Uuid
+  branchId        String?      @db.Uuid
   code           String
   name           String
   isActive       Boolean      @default(true)
@@ -534,6 +535,7 @@ model PosRegister {
   @@unique([organizationId, code])
   @@index([organizationId, warehouseId, isActive])
   @@index([organizationId, assignedStaffId, isActive])
+  @@index([organizationId, branchId, isActive])
 }
 
 model PosShift {

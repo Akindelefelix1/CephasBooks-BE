@@ -73,12 +73,46 @@ export class PosService {
       meta: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
     };
   }
-  registers(org: string, staffId: string, role: string) {
+  async branches(org: string, staffId: string, role: string) {
+    const organization = await this.db.organization.findUnique({
+      where: { id: org },
+      select: { onboardingData: true },
+    });
+    const membership = ['OWNER', 'ADMIN'].includes(role)
+      ? null
+      : await this.db.membership.findFirst({
+          where: { organizationId: org, userId: staffId, user: { isActive: true } },
+          select: { id: true },
+        });
+    const root = this.asObject(organization?.onboardingData);
+    const admin = this.asObject(root.admin);
+    const hierarchy = this.asObject(admin.branches);
+    const branches = Array.isArray(hierarchy.items)
+      ? (hierarchy.items as Array<Record<string, unknown>>)
+      : [];
+    return branches.filter(
+      (branch) =>
+        branch.status !== 'Inactive' &&
+        (['OWNER', 'ADMIN'].includes(role) ||
+          (membership &&
+            Array.isArray(branch.managerIds) &&
+            branch.managerIds.includes(membership.id))),
+    );
+  }
+  async registers(org: string, staffId: string, role: string) {
+    const accessibleBranches = await this.branches(org, staffId, role);
     return this.db.posRegister.findMany({
       where: {
         organizationId: org,
         isActive: true,
-        ...(!['OWNER', 'ADMIN'].includes(role) ? { assignedStaffId: staffId } : {}),
+        ...(!['OWNER', 'ADMIN'].includes(role)
+          ? {
+              OR: [
+                { branchId: { in: accessibleBranches.map((branch) => String(branch.id)) } },
+                { branchId: null, assignedStaffId: staffId },
+              ],
+            }
+          : {}),
       },
       include: {
         warehouse: true,
@@ -104,7 +138,7 @@ export class PosService {
   }
   async createRegister(
     org: string,
-    data: { warehouseId: string; assignedStaffId: string; code: string; name: string },
+    data: { warehouseId: string; assignedStaffId: string; branchId: string; code: string; name: string },
   ) {
     const [warehouse, membership] = await Promise.all([
       this.db.warehouse.findFirst({
@@ -120,6 +154,7 @@ export class PosService {
     ]);
     if (!warehouse) throw new BadRequestException('Select an active warehouse for this register');
     if (!membership) throw new BadRequestException('Select an active staff member for this register');
+    await this.requireBranch(org, data.branchId);
     return this.db.posRegister.create({
       data: { ...data, organizationId: org },
       include: {
@@ -128,7 +163,12 @@ export class PosService {
       },
     });
   }
-  async assignRegisterStaff(org: string, registerId: string, assignedStaffId: string) {
+  async assignRegisterStaff(
+    org: string,
+    registerId: string,
+    assignedStaffId: string,
+    branchId: string,
+  ) {
     const [register, membership] = await Promise.all([
       this.db.posRegister.findFirst({ where: { id: registerId, organizationId: org, isActive: true } }),
       this.db.membership.findFirst({
@@ -137,9 +177,10 @@ export class PosService {
     ]);
     if (!register) throw new NotFoundException('Active register not found');
     if (!membership) throw new BadRequestException('Select an active staff member for this register');
+    await this.requireBranch(org, branchId);
     return this.db.posRegister.update({
       where: { id: register.id },
-      data: { assignedStaffId },
+      data: { assignedStaffId, branchId },
       include: {
         warehouse: true,
         assignedStaff: { select: { id: true, email: true, firstName: true, lastName: true } },
@@ -162,10 +203,8 @@ export class PosService {
       where: { id: data.registerId, organizationId: org, isActive: true },
     });
     if (!register) throw new NotFoundException('Active register not found');
-    if (!register.assignedStaffId)
-      throw new BadRequestException('Assign this register to an active staff member first');
-    if (register.assignedStaffId !== cashierId)
-      throw new BadRequestException('This register is assigned to another staff member');
+    if (!(await this.canUseRegister(org, cashierId, register)))
+      throw new BadRequestException('This register is not assigned to your branch');
     const existing = await this.db.posShift.findFirst({
       where: { registerId: register.id, status: 'OPEN' },
     });
@@ -223,7 +262,6 @@ export class PosService {
       }>;
     },
   ) {
-    await assertBranch(this.db, org, data.branchId);
     if (!data.items?.length || !data.payments?.length)
       throw new BadRequestException('Items and payment are required');
     return this.db.$transaction(async (tx) => {
@@ -246,8 +284,10 @@ export class PosService {
         throw new BadRequestException(
           'Open a cashier shift on an active register before completing a sale',
         );
-      if (shift.register.assignedStaffId !== cashierId)
-        throw new BadRequestException('This register is not assigned to the signed-in staff member');
+      if (!(await this.canUseRegister(org, cashierId, shift.register)))
+        throw new BadRequestException('This register is not assigned to your branch');
+      const saleBranchId = shift.register.branchId ?? data.branchId;
+      await assertBranch(this.db, org, saleBranchId);
       const warehouse = shift.register.warehouse;
       const products = await tx.product.findMany({
         where: {
@@ -345,7 +385,7 @@ export class PosService {
       const sale = await tx.posSale.create({
         data: {
           organizationId: org,
-          branchId: data.branchId,
+          branchId: saleBranchId,
           customerId: data.customerId || null,
           registerId: shift.registerId,
           shiftId: shift.id,
@@ -408,6 +448,26 @@ export class PosService {
       });
       return sale;
     });
+  }
+
+  private asObject(value: Prisma.JsonValue | undefined): Prisma.JsonObject {
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  }
+
+  private async requireBranch(org: string, branchId: string) {
+    const branches = await this.branches(org, '', 'OWNER');
+    if (!branches.some((branch) => branch.id === branchId))
+      throw new BadRequestException('Select an active branch for this register');
+  }
+
+  private async canUseRegister(
+    org: string,
+    staffId: string,
+    register: { branchId?: string | null; assignedStaffId?: string | null },
+  ) {
+    if (!register.branchId) return register.assignedStaffId === staffId;
+    const branches = await this.branches(org, staffId, 'MEMBER');
+    return branches.some((branch) => branch.id === register.branchId);
   }
   async voidSale(org: string, actorId: string, saleId: string, reason: string) {
     return this.db.$transaction(async (tx) => {
