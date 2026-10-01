@@ -4,6 +4,71 @@ import { jest } from '@jest/globals';
 import { OperationsService } from './operations.service.ts';
 
 describe('OperationsService', () => {
+  it('values product stock using sale price', async () => {
+    const service = new OperationsService({
+      product: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'product-a',
+            type: 'PRODUCT',
+            salePrice: new Prisma.Decimal(600),
+            costPrice: new Prisma.Decimal(320),
+          },
+        ]),
+      },
+      stockMovement: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            productId: 'product-a',
+            type: 'RECEIPT',
+            quantity: new Prisma.Decimal(32),
+            unitCost: new Prisma.Decimal(320),
+          },
+        ]),
+      },
+    } as never);
+
+    const [product] = await service.products('org-a', {});
+
+    expect(product.stockQuantity.toString()).toBe('32');
+    expect(product.stockValue.toString()).toBe('19200');
+  });
+
+  it('totals inventory value using sale price', async () => {
+    const service = new OperationsService({
+      organization: {
+        findUniqueOrThrow: jest.fn().mockResolvedValue({ baseCurrency: 'NGN' }),
+      },
+      product: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'product-a',
+            type: 'PRODUCT',
+            salePrice: new Prisma.Decimal(1000),
+            costPrice: new Prisma.Decimal(700),
+            reorderLevel: new Prisma.Decimal(5),
+          },
+        ]),
+      },
+      warehouse: { count: jest.fn().mockResolvedValue(1) },
+      project: { count: jest.fn().mockResolvedValue(0) },
+      stockMovement: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            productId: 'product-a',
+            type: 'RECEIPT',
+            quantity: new Prisma.Decimal(11),
+            unitCost: new Prisma.Decimal(700),
+          },
+        ]),
+      },
+    } as never);
+
+    const summary = await service.summary('org-a');
+
+    expect(summary.inventoryValue.toString()).toBe('11000');
+  });
+
   it('rejects opening stock for a service', async () => {
     const transaction = jest.fn();
     const service = new OperationsService({ $transaction: transaction } as never);

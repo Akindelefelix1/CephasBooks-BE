@@ -103,7 +103,7 @@ export class AuthService {
     const [user, organization] = await Promise.all([
       this.prisma.user.findUniqueOrThrow({
         where: { id: userId },
-        select: { firstName: true, lastName: true, email: true, phone: true, address: true, mustChangePassword: true, createdAt: true, isActive: true },
+        select: { firstName: true, lastName: true, email: true, phone: true, address: true, mustChangePassword: true, passwordChangedAt: true, createdAt: true, isActive: true },
       }),
       this.prisma.organization.findUniqueOrThrow({
         where: { id: organizationId },
@@ -127,6 +127,7 @@ export class AuthService {
         phone: true,
         address: true,
         mustChangePassword: true,
+        passwordChangedAt: true,
         createdAt: true,
         isActive: true,
       },
@@ -147,14 +148,22 @@ export class AuthService {
     await this.prisma.$transaction([
       this.prisma.user.update({
         where: { id: userId },
-        data: { passwordHash: await argon2.hash(dto.newPassword), mustChangePassword: false },
+        data: {
+          passwordHash: await argon2.hash(dto.newPassword),
+          mustChangePassword: false,
+          passwordChangedAt: new Date(),
+        },
       }),
       this.prisma.session.updateMany({
         where: { userId, revokedAt: null },
         data: { revokedAt: new Date() },
       }),
     ]);
-    return { changed: true };
+    const updated = await this.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: { passwordChangedAt: true },
+    });
+    return { changed: true as const, passwordChangedAt: updated.passwordChangedAt };
   }
 
   async verifyEmail(dto: VerifyEmailDto): Promise<Tokens> {

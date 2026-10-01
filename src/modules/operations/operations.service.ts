@@ -39,7 +39,7 @@ export class OperationsService {
       outOfStock = 0;
     for (const product of products.filter((x) => x.type === 'PRODUCT')) {
       const quantity = stock.get(product.id) ?? new Prisma.Decimal(0);
-      inventoryValue = inventoryValue.add(quantity.mul(product.costPrice));
+      inventoryValue = inventoryValue.add(quantity.mul(product.salePrice));
       if (quantity.lte(0)) outOfStock += 1;
       else if (quantity.lte(product.reorderLevel)) lowStock += 1;
     }
@@ -90,7 +90,7 @@ export class OperationsService {
     return products.map((product) => ({
       ...product,
       stockQuantity: stock.get(product.id) ?? new Prisma.Decimal(0),
-      stockValue: (stock.get(product.id) ?? new Prisma.Decimal(0)).mul(product.costPrice),
+      stockValue: (stock.get(product.id) ?? new Prisma.Decimal(0)).mul(product.salePrice),
     }));
   }
 
@@ -175,7 +175,7 @@ export class OperationsService {
     return {
       ...product,
       stockQuantity,
-      stockValue: stockQuantity.mul(product.costPrice),
+      stockValue: stockQuantity.mul(product.salePrice),
       createdBy: created?.actor ?? null,
       activity,
       movements,

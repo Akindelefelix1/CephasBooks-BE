@@ -117,4 +117,33 @@ describe('AuthService', () => {
     );
     expect(sendCode).not.toHaveBeenCalled();
   });
+
+  it('changes the password and records when it was changed', async () => {
+    const argon2 = await import('argon2');
+    const oldHash = await argon2.hash('Current!123');
+    const changedAt = new Date('2026-10-01T12:00:00.000Z');
+    const findUniqueOrThrow = jest
+      .fn()
+      .mockResolvedValueOnce({ id: 'user-a', passwordHash: oldHash })
+      .mockResolvedValueOnce({ passwordChangedAt: changedAt });
+    const transaction = jest.fn().mockResolvedValue([]);
+    const service = new AuthService(
+      {
+        user: { findUniqueOrThrow, update: jest.fn() },
+        session: { updateMany: jest.fn() },
+        $transaction: transaction,
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    await expect(
+      service.changePassword('user-a', {
+        currentPassword: 'Current!123',
+        newPassword: 'NewPassword!456',
+      }),
+    ).resolves.toEqual({ changed: true, passwordChangedAt: changedAt });
+    expect(transaction).toHaveBeenCalledTimes(1);
+  });
 });
