@@ -112,6 +112,12 @@ export class OperationsController {
   ) {
     return this.operations.warehouseStatus(u.organizationId, id, d.isActive);
   }
+  @Roles(Role.OWNER, Role.ADMIN) @Patch('warehouses/:id/default') makeDefaultWarehouse(
+    @CurrentUser() u: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.operations.makeDefaultWarehouse(u.organizationId, id);
+  }
   @Get('movements') movements(@CurrentUser() u: AuthUser, @Query() q: Record<string, string>) {
     return this.operations.movements(u.organizationId, q);
   }

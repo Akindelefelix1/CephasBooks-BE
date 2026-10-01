@@ -34,6 +34,148 @@ describe('OperationsService', () => {
     expect(product.stockValue.toString()).toBe('19200');
   });
 
+  it('filters products by category and low stock', async () => {
+    const findMany = jest.fn().mockResolvedValue([
+      {
+        id: 'low-product',
+        type: 'PRODUCT',
+        category: 'Perfume',
+        salePrice: new Prisma.Decimal(600),
+        reorderLevel: new Prisma.Decimal(5),
+      },
+      {
+        id: 'healthy-product',
+        type: 'PRODUCT',
+        category: 'Perfume',
+        salePrice: new Prisma.Decimal(1000),
+        reorderLevel: new Prisma.Decimal(5),
+      },
+    ]);
+    const service = new OperationsService({
+      product: { findMany },
+      stockMovement: {
+        findMany: jest.fn().mockResolvedValue([
+          { productId: 'low-product', type: 'RECEIPT', quantity: new Prisma.Decimal(2) },
+          { productId: 'healthy-product', type: 'RECEIPT', quantity: new Prisma.Decimal(10) },
+        ]),
+      },
+    } as never);
+
+    const products = await service.products('org-a', {
+      status: 'low_stock',
+      category: 'Perfume',
+    });
+
+    expect(products.map((product) => product.id)).toEqual(['low-product']);
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        // Jest's asymmetric matcher is intentionally dynamic.
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        where: expect.objectContaining({
+          category: { equals: 'Perfume', mode: 'insensitive' },
+        }),
+      }),
+    );
+  });
+
+  it('filters out-of-stock products and excludes services', async () => {
+    const service = new OperationsService({
+      product: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'out-product',
+            type: 'PRODUCT',
+            salePrice: new Prisma.Decimal(600),
+            reorderLevel: new Prisma.Decimal(5),
+          },
+          {
+            id: 'service',
+            type: 'SERVICE',
+            salePrice: new Prisma.Decimal(1000),
+            reorderLevel: new Prisma.Decimal(0),
+          },
+        ]),
+      },
+      stockMovement: { findMany: jest.fn().mockResolvedValue([]) },
+    } as never);
+
+    const products = await service.products('org-a', { status: 'out_of_stock' });
+
+    expect(products.map((product) => product.id)).toEqual(['out-product']);
+  });
+
+  it('uses the organization default warehouse for a new product', async () => {
+    const create = jest.fn().mockImplementation((request) => Promise.resolve(request.data));
+    const tx = {
+      warehouse: { findFirst: jest.fn().mockResolvedValue({ id: 'warehouse-default' }) },
+      product: { create },
+    };
+    const service = new OperationsService({
+      warehouse: { findFirst: jest.fn().mockResolvedValue({ id: 'warehouse-default' }) },
+      $transaction: jest
+        .fn()
+        .mockImplementation((operation: (client: typeof tx) => unknown) => operation(tx)),
+    } as never);
+
+    await service.createProduct('org-a', {
+      sku: 'SKU-DEFAULT',
+      name: 'Defaulted product',
+      type: 'PRODUCT',
+      unit: 'unit',
+      salePrice: 100,
+      costPrice: 50,
+      taxRate: 0,
+      reorderLevel: 2,
+      openingQuantity: 0,
+    });
+
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        // Jest's asymmetric matcher is intentionally dynamic.
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        data: expect.objectContaining({ defaultWarehouseId: 'warehouse-default' }),
+      }),
+    );
+  });
+
+  it('makes an active warehouse the only organization default', async () => {
+    const updateMany = jest.fn().mockResolvedValue({ count: 1 });
+    const update = jest.fn().mockResolvedValue({ id: 'warehouse-b', isDefault: true });
+    const tx = { warehouse: { updateMany, update } };
+    const service = new OperationsService({
+      warehouse: { findFirst: jest.fn().mockResolvedValue({ id: 'warehouse-b', isActive: true }) },
+      $transaction: jest
+        .fn()
+        .mockImplementation((operation: (client: typeof tx) => unknown) => operation(tx)),
+    } as never);
+
+    await service.makeDefaultWarehouse('org-a', 'warehouse-b');
+
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { organizationId: 'org-a', isDefault: true },
+      data: { isDefault: false },
+    });
+    expect(update).toHaveBeenCalledWith({
+      where: { id: 'warehouse-b' },
+      data: { isDefault: true },
+    });
+  });
+
+  it('does not archive the default warehouse', async () => {
+    const update = jest.fn();
+    const service = new OperationsService({
+      warehouse: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'warehouse-a', isDefault: true }),
+        update,
+      },
+    } as never);
+
+    await expect(service.warehouseStatus('org-a', 'warehouse-a', false)).rejects.toThrow(
+      'Choose another default warehouse before archiving this one',
+    );
+    expect(update).not.toHaveBeenCalled();
+  });
+
   it('totals inventory value using sale price', async () => {
     const service = new OperationsService({
       organization: {

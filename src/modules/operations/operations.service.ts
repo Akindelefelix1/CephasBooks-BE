@@ -72,6 +72,9 @@ export class OperationsService {
               ],
             }
           : {}),
+        ...(q.category
+          ? { category: { equals: q.category, mode: 'insensitive' } }
+          : {}),
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -87,11 +90,23 @@ export class OperationsService {
         })
       : [];
     const stock = this.stockMap(movements);
-    return products.map((product) => ({
+    const valuedProducts = products.map((product) => ({
       ...product,
       stockQuantity: stock.get(product.id) ?? new Prisma.Decimal(0),
       stockValue: (stock.get(product.id) ?? new Prisma.Decimal(0)).mul(product.salePrice),
     }));
+    if (q.status === 'low_stock')
+      return valuedProducts.filter(
+        (product) =>
+          product.type === 'PRODUCT' &&
+          product.stockQuantity.gt(0) &&
+          product.stockQuantity.lte(product.reorderLevel),
+      );
+    if (q.status === 'out_of_stock')
+      return valuedProducts.filter(
+        (product) => product.type === 'PRODUCT' && product.stockQuantity.lte(0),
+      );
+    return valuedProducts;
   }
 
   async productDetails(org: string, id: string) {
@@ -231,7 +246,15 @@ export class OperationsService {
             : 'Opening quantity must be a whole number',
         );
     }
-    const stockWarehouseId = defaultWarehouseId ?? openingWarehouseId;
+    const organizationDefault =
+      d.type === 'PRODUCT' && !defaultWarehouseId && !openingWarehouseId
+        ? await this.db.warehouse.findFirst({
+            where: { organizationId: org, isDefault: true, isActive: true },
+            select: { id: true },
+          })
+        : null;
+    const stockWarehouseId =
+      defaultWarehouseId ?? openingWarehouseId ?? organizationDefault?.id;
     if (openingQuantity > 0 && !stockWarehouseId)
       throw new BadRequestException('Select a warehouse for opening stock');
     return this.db.$transaction(async (tx) => {
@@ -536,19 +559,28 @@ export class OperationsService {
             }
           : {}),
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
     });
   }
-  createWarehouse(org: string, d: WarehouseDto) {
-    return this.db.warehouse.create({ data: { ...d, organizationId: org } });
+  async createWarehouse(org: string, d: WarehouseDto) {
+    return this.db.$transaction(async (tx) => {
+      const existingDefault = await tx.warehouse.count({
+        where: { organizationId: org, isDefault: true },
+      });
+      return tx.warehouse.create({
+        data: { ...d, organizationId: org, isDefault: existingDefault === 0 },
+      });
+    });
   }
   async updateWarehouse(org: string, id: string, d: WarehouseDto) {
     await this.warehouse(org, id);
     return this.db.warehouse.update({ where: { id }, data: d });
   }
   async warehouseStatus(org: string, id: string, isActive: boolean) {
-    await this.warehouse(org, id);
+    const warehouse = await this.warehouse(org, id);
     if (!isActive) {
+      if (warehouse.isDefault)
+        throw new BadRequestException('Choose another default warehouse before archiving this one');
       const movements = await this.db.stockMovement.findMany({
         where: { organizationId: org, warehouseId: id },
         select: { productId: true, type: true, quantity: true, unitCost: true },
@@ -560,6 +592,17 @@ export class OperationsService {
         throw new BadRequestException('A warehouse with stock on hand cannot be archived');
     }
     return this.db.warehouse.update({ where: { id }, data: { isActive } });
+  }
+
+  async makeDefaultWarehouse(org: string, id: string) {
+    await this.warehouse(org, id, true);
+    return this.db.$transaction(async (tx) => {
+      await tx.warehouse.updateMany({
+        where: { organizationId: org, isDefault: true },
+        data: { isDefault: false },
+      });
+      return tx.warehouse.update({ where: { id }, data: { isDefault: true } });
+    });
   }
 
   movements(org: string, q: Record<string, string>) {
