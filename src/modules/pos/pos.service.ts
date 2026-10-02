@@ -20,6 +20,25 @@ export function assertSaleQuantity(
   }
 }
 
+export function calculatePosLine(
+  product: { name?: string; salePrice: number | Prisma.Decimal; taxRate: number | Prisma.Decimal },
+  rawQuantity: number | Prisma.Decimal,
+  rawUnitDiscount = 0,
+) {
+  const quantity = new Prisma.Decimal(rawQuantity);
+  const unitPrice = new Prisma.Decimal(product.salePrice);
+  const unitDiscount = new Prisma.Decimal(rawUnitDiscount);
+  if (unitDiscount.gt(unitPrice))
+    throw new BadRequestException(
+      `${product.name ?? 'Product'}: discount per unit cannot exceed the unit price`,
+    );
+  const base = unitPrice.mul(quantity);
+  const discount = unitDiscount.mul(quantity);
+  const taxable = base.sub(discount);
+  const tax = taxable.mul(product.taxRate).div(100);
+  return { quantity, unitDiscount, base, discount, tax, total: taxable.add(tax) };
+}
+
 @Injectable()
 export class PosService {
   constructor(private readonly db: PrismaService) {}
@@ -248,7 +267,6 @@ export class PosService {
   async complete(
     org: string,
     cashierId: string,
-    role: string,
     data: {
       registerId: string;
       branchId?: string;
@@ -304,18 +322,17 @@ export class PosService {
       const items = data.items.map((line) => {
         const product = products.find((x) => x.id === line.productId)!;
         assertSaleQuantity(product, line.quantity);
-        const base = new Prisma.Decimal(product.salePrice).mul(line.quantity),
-          discount = new Prisma.Decimal(line.discount || 0);
-        const taxable = base.sub(discount),
-          tax = taxable.mul(product.taxRate).div(100);
+        const calculated = calculatePosLine(product, line.quantity, line.discount || 0);
+        const { base, discount, tax, total, unitDiscount } = calculated;
         subtotal = subtotal.add(base);
         discountTotal = discountTotal.add(discount);
         taxTotal = taxTotal.add(tax);
         return {
           product,
-          quantity: new Prisma.Decimal(line.quantity),
+          quantity: calculated.quantity,
+          unitDiscount,
           discount,
-          total: taxable.add(tax),
+          total,
         };
       });
       const total = subtotal.sub(discountTotal).add(taxTotal),
@@ -330,8 +347,6 @@ export class PosService {
         );
       if (paid.gt(total) && !data.payments.some((payment) => payment.method === 'CASH'))
         throw new BadRequestException('Only cash payments can exceed the total due');
-      if (discountTotal.gt(0) && !['OWNER', 'ADMIN', 'APPROVER'].includes(role))
-        throw new BadRequestException('Discounts require an approved role');
       const credit = data.payments
         .filter((p) => p.method === 'CREDIT')
         .reduce((sum, p) => sum.add(p.amount), new Prisma.Decimal(0));

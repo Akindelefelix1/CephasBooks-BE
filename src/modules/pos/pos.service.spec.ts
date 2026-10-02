@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { jest } from '@jest/globals';
-import { assertSaleQuantity, PosService } from './pos.service.ts';
+import { assertSaleQuantity, calculatePosLine, PosService } from './pos.service.ts';
 
 describe('POS sale quantities', () => {
   it('allows whole quantities for every product', () => {
@@ -25,6 +26,29 @@ describe('POS sale quantities', () => {
     expect(() =>
       assertSaleQuantity({ name: 'Fabric', allowFractionalSale: true }, 5.25),
     ).toThrow(BadRequestException);
+  });
+});
+
+describe('POS line discounts', () => {
+  it('subtracts the discount amount from each unit', () => {
+    const line = calculatePosLine(
+      { name: 'Perfume', salePrice: new Prisma.Decimal(5500), taxRate: new Prisma.Decimal(0) },
+      2,
+      200,
+    );
+
+    expect(line.discount.toString()).toBe('400');
+    expect(line.total.toString()).toBe('10600');
+  });
+
+  it('rejects a per-unit discount above the selling price', () => {
+    expect(() =>
+      calculatePosLine(
+        { name: 'Perfume', salePrice: new Prisma.Decimal(5500), taxRate: new Prisma.Decimal(0) },
+        1,
+        5501,
+      ),
+    ).toThrow('discount per unit cannot exceed the unit price');
   });
 });
 

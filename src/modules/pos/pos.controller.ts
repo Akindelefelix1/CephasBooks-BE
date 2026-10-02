@@ -20,7 +20,7 @@ export class PosController {
   @Get('shifts/current') currentShift(@CurrentUser() u: AuthUser) { return this.pos.currentShift(u.organizationId, u.sub); }
   @Post('shifts') openShift(@CurrentUser() u: AuthUser, @Body() data: OpenShiftDto) { return this.pos.openShift(u.organizationId, u.sub, data); }
   @Post('shifts/:id/close') closeShift(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() data: CloseShiftDto) { return this.pos.closeShift(u.organizationId, u.sub, id, data); }
-  @Post('sales') complete(@CurrentUser() u: AuthUser, @Body() data: CompletePosSaleDto) { return this.pos.complete(u.organizationId, u.sub, u.role, data); }
+  @Post('sales') complete(@CurrentUser() u: AuthUser, @Body() data: CompletePosSaleDto) { return this.pos.complete(u.organizationId, u.sub, data); }
   @Patch('sales/:id/receipt-signatures') updateReceiptSignatures(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() data: UpdatePosReceiptSignaturesDto) { return this.pos.updateReceiptSignatures(u.organizationId, id, data); }
   @Post('sales/:id/returns') returnItem(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() data: ReturnPosSaleDto) { return this.pos.returnItem(u.organizationId, u.sub, id, data); }
   @Roles(Role.OWNER, Role.ADMIN)
