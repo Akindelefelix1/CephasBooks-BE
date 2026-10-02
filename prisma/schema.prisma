@@ -465,6 +465,7 @@ model PosSale {
   cashierId          String?       @db.Uuid
   status             PosSaleStatus @default(COMPLETED)
   idempotencyKey     String?
+  receiptToken       String        @unique @default(uuid()) @db.Uuid
   discountApprovedBy String?       @db.Uuid
   currency           String        @default("NGN") @db.Char(3)
   subtotal           Decimal       @db.Decimal(19, 4)

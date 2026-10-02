@@ -1,9 +1,11 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../database/prisma.service.ts';
 import { assertBranch } from '../../common/branch-scope.ts';
 import type { UpdatePosReceiptSignaturesDto } from './dto/pos.dto.ts';
 import { postAutomaticJournal } from '../../common/automatic-accounting.ts';
+import { MailService } from '../mail/mail.service.ts';
 
 export function assertSaleQuantity(
   product: { name?: string; allowFractionalSale: boolean },
@@ -41,7 +43,11 @@ export function calculatePosLine(
 
 @Injectable()
 export class PosService {
-  constructor(private readonly db: PrismaService) {}
+  constructor(
+    private readonly db: PrismaService,
+    private readonly mail?: MailService,
+    private readonly config?: ConfigService,
+  ) {}
   async list(
     org: string,
     query: {
@@ -88,9 +94,77 @@ export class PosService {
       this.db.posSale.count({ where }),
     ]);
     return {
-      data,
+      data: await Promise.all(
+        data.map((sale) => this.decorateReceipt(org, sale as unknown as Record<string, unknown>)),
+      ),
       meta: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
     };
+  }
+  async receipt(org: string, saleId: string) {
+    const sale = await this.db.posSale.findFirst({
+      where: { id: saleId, organizationId: org },
+      include: { items: true, payments: true, customer: true },
+    });
+    if (!sale) throw new NotFoundException('Sale receipt not found');
+    return this.decorateReceipt(org, sale as unknown as Record<string, unknown>);
+  }
+  async recordReprint(org: string, actorId: string, saleId: string) {
+    const sale = await this.receipt(org, saleId);
+    await this.db.posAuditLog.create({
+      data: {
+        organizationId: org,
+        actorId,
+        action: 'RECEIPT_REPRINTED',
+        entityType: 'PosSale',
+        entityId: saleId,
+      },
+    });
+    return sale;
+  }
+  async emailReceipt(org: string, actorId: string, saleId: string) {
+    const sale = (await this.receipt(org, saleId)) as Record<string, unknown> & {
+      customer?: { email?: string | null } | null;
+      receiptNumber?: string;
+      receipt?: Record<string, unknown>;
+    };
+    if (!this.mail) throw new ServiceUnavailableException('Email delivery is unavailable');
+    const customer = sale.customer as { email?: string | null } | null;
+    const email = customer?.email?.trim();
+    if (!email) throw new BadRequestException('This sale customer does not have an email address');
+    const context = sale.receipt as Record<string, unknown>;
+    await this.mail.send({
+      to: email,
+      subject: `${String(context.organizationName)} receipt ${String(sale.receiptNumber)}`,
+      html: this.receiptEmailHtml(sale),
+    });
+    await this.db.posAuditLog.create({
+      data: { organizationId: org, actorId, action: 'RECEIPT_EMAILED', entityType: 'PosSale', entityId: saleId, metadata: { email } },
+    });
+    return { sent: true };
+  }
+  async smsReceipt(org: string, actorId: string, saleId: string) {
+    const sale = (await this.receipt(org, saleId)) as Record<string, unknown> & {
+      customer?: { phone?: string | null } | null;
+      receiptNumber?: string;
+      receipt?: Record<string, unknown>;
+    };
+    const customer = sale.customer as { phone?: string | null } | null;
+    const phone = customer?.phone?.trim();
+    if (!phone) throw new BadRequestException('This sale customer does not have a phone number');
+    const url = this.config?.get<string>('SMS_API_URL');
+    const token = this.config?.get<string>('SMS_API_TOKEN');
+    const sender = this.config?.get<string>('SMS_SENDER') || 'CephasBooks';
+    if (!url || !token) throw new ServiceUnavailableException('SMS delivery is not configured');
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ to: phone, from: sender, message: `${String((sale.receipt as Record<string, unknown>).organizationName)} receipt ${String(sale.receiptNumber)}: ${String((sale.receipt as Record<string, unknown>).digitalUrl)}` }),
+    });
+    if (!response.ok) throw new ServiceUnavailableException('Unable to send SMS receipt');
+    await this.db.posAuditLog.create({
+      data: { organizationId: org, actorId, action: 'RECEIPT_SMS_SENT', entityType: 'PosSale', entityId: saleId, metadata: { phone } },
+    });
+    return { sent: true };
   }
   async branches(org: string, staffId: string, role: string) {
     const organization = await this.db.organization.findUnique({
@@ -146,7 +220,7 @@ export class PosService {
       select: { id: true },
     });
     if (!sale) throw new NotFoundException('Sale not found');
-    return this.db.posSale.update({
+    const updated = await this.db.posSale.update({
       where: { id: sale.id },
       data: {
         customerSignature: data.customerSignature ?? null,
@@ -154,6 +228,7 @@ export class PosService {
       },
       include: { items: true, payments: true, customer: true },
     });
+    return this.decorateReceipt(org, updated as unknown as Record<string, unknown>);
   }
   async createRegister(
     org: string,
@@ -467,6 +542,73 @@ export class PosService {
 
   private asObject(value: Prisma.JsonValue | undefined): Prisma.JsonObject {
     return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  }
+
+  private async decorateReceipt(org: string, sale: Record<string, unknown>) {
+    const [organization, register, cashier] = await Promise.all([
+      this.db.organization.findUnique({
+        where: { id: org },
+        select: { name: true, onboardingData: true },
+      }),
+      sale.registerId
+        ? this.db.posRegister.findFirst({
+            where: { id: String(sale.registerId), organizationId: org },
+            select: { id: true, code: true, name: true },
+          })
+        : null,
+      sale.cashierId
+        ? this.db.user.findUnique({
+            where: { id: String(sale.cashierId) },
+            select: { email: true, firstName: true, lastName: true },
+          })
+        : null,
+    ]);
+    const root = this.asObject(organization?.onboardingData);
+    const business = this.asObject(root.business as Prisma.JsonValue);
+    const admin = this.asObject(root.admin as Prisma.JsonValue);
+    const profile = this.asObject(admin.profile as Prisma.JsonValue);
+    const hierarchy = this.asObject(admin.branches as Prisma.JsonValue);
+    const branches = Array.isArray(hierarchy.items)
+      ? (hierarchy.items as Array<Record<string, unknown>>)
+      : [];
+    const branch = branches.find((item) => item.id === sale.branchId);
+    const token = String(sale.receiptToken || sale.id);
+    const appUrl = (this.config?.get<string>('PUBLIC_APP_URL') || 'https://cephas-books.onrender.com').replace(/\/$/, '');
+    return {
+      ...sale,
+      receipt: {
+        organizationName: organization?.name || String(business.businessName || 'Cephas Books'),
+        logoUrl: String(profile.logoUrl || business.logoUrl || ''),
+        organizationPhone: String(profile.phone || business.phone || ''),
+        organizationAddress: String(profile.address || business.address || ''),
+        organizationWebsite: String(profile.website || business.website || ''),
+        returnPolicy: String(profile.returnPolicy || 'Returns are subject to the business return policy.'),
+        branchName: String(branch?.name || ''),
+        branchAddress: String(branch?.address || ''),
+        branchPhone: String(branch?.phone || ''),
+        register: register || null,
+        cashier: cashier
+          ? {
+              name: [cashier.firstName, cashier.lastName].filter(Boolean).join(' ') || cashier.email,
+              email: cashier.email,
+            }
+          : null,
+        verificationCode: token.slice(0, 8).toUpperCase(),
+        digitalUrl: `${appUrl}/receipt/${token}`,
+      },
+    };
+  }
+
+  private receiptEmailHtml(sale: Record<string, unknown>) {
+    const receipt = sale.receipt as Record<string, unknown>;
+    const items = (sale.items as Array<Record<string, unknown>>)
+      .map((item) => `<tr><td>${this.escapeHtml(String(item.description))}</td><td>${this.escapeHtml(String(item.quantity))}</td><td>${this.escapeHtml(String(item.lineTotal))}</td></tr>`)
+      .join('');
+    return `<h2>${this.escapeHtml(String(receipt.organizationName))}</h2><p>Receipt ${this.escapeHtml(String(sale.receiptNumber))}</p><p>${this.escapeHtml(String(receipt.branchName || ''))}</p><table><thead><tr><th>Item</th><th>Quantity</th><th>Total</th></tr></thead><tbody>${items}</tbody></table><p><strong>Total: ${this.escapeHtml(String(sale.currency))} ${this.escapeHtml(String(sale.total))}</strong></p><p><a href="${this.escapeHtml(String(receipt.digitalUrl))}">View digital receipt</a></p>`;
+  }
+
+  private escapeHtml(value: string) {
+    return value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character] || character);
   }
 
   private async requireBranch(org: string, branchId: string) {

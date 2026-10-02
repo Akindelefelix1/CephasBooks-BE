@@ -11,6 +11,13 @@ import { AssignRegisterStaffDto, CloseShiftDto, CompletePosSaleDto, CreateRegist
 export class PosController {
   constructor(private readonly pos: PosService) {}
   @Get('sales') list(@CurrentUser() u: AuthUser, @Query() query: ListPosSalesDto) { return this.pos.list(u.organizationId, query); }
+  @Get('sales/:id/receipt') receipt(@CurrentUser() u: AuthUser, @Param('id') id: string) { return this.pos.receipt(u.organizationId, id); }
+  @Roles(Role.OWNER, Role.ADMIN)
+  @Post('sales/:id/receipt/reprint') reprint(@CurrentUser() u: AuthUser, @Param('id') id: string) { return this.pos.recordReprint(u.organizationId, u.sub, id); }
+  @Roles(Role.OWNER, Role.ADMIN)
+  @Post('sales/:id/receipt/email') emailReceipt(@CurrentUser() u: AuthUser, @Param('id') id: string) { return this.pos.emailReceipt(u.organizationId, u.sub, id); }
+  @Roles(Role.OWNER, Role.ADMIN)
+  @Post('sales/:id/receipt/sms') smsReceipt(@CurrentUser() u: AuthUser, @Param('id') id: string) { return this.pos.smsReceipt(u.organizationId, u.sub, id); }
   @Get('registers') registers(@CurrentUser() u: AuthUser) { return this.pos.registers(u.organizationId, u.sub, u.role); }
   @Get('branches') branches(@CurrentUser() u: AuthUser) { return this.pos.branches(u.organizationId, u.sub, u.role); }
   @Roles(Role.OWNER)
