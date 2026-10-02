@@ -369,13 +369,47 @@ export class PosService {
         });
         if (prior) return prior;
       }
-      const shift = await tx.posShift.findFirst({
+      let shift = await tx.posShift.findFirst({
         where: { organizationId: org, registerId: data.registerId, cashierId, status: 'OPEN' },
         include: { register: { include: { warehouse: true } } },
       });
-      if (!shift || !shift.register.isActive || !shift.register.warehouse.isActive)
+      if (!shift) {
+        const register = await tx.posRegister.findFirst({
+          where: { id: data.registerId, organizationId: org, isActive: true },
+          include: { warehouse: true },
+        });
+        if (!register || !register.warehouse.isActive)
+          throw new BadRequestException('Select an active register before completing a sale');
+        if (!(await this.canUseRegister(org, cashierId, register)))
+          throw new BadRequestException('This register is not assigned to your branch');
+        const registerShift = await tx.posShift.findFirst({
+          where: { registerId: register.id, status: 'OPEN' },
+        });
+        if (registerShift)
+          throw new BadRequestException('This register is currently in use by another cashier');
+        shift = await tx.posShift.create({
+          data: {
+            organizationId: org,
+            registerId: register.id,
+            cashierId,
+            openingCash: 0,
+          },
+          include: { register: { include: { warehouse: true } } },
+        });
+        await tx.posAuditLog.create({
+          data: {
+            organizationId: org,
+            actorId: cashierId,
+            action: 'SHIFT_AUTO_OPENED',
+            entityType: 'PosShift',
+            entityId: shift.id,
+            metadata: { registerId: register.id, openingCash: 0 },
+          },
+        });
+      }
+      if (!shift.register.isActive || !shift.register.warehouse.isActive)
         throw new BadRequestException(
-          'Open a cashier shift on an active register before completing a sale',
+          'Select an active register before completing a sale',
         );
       if (!(await this.canUseRegister(org, cashierId, shift.register)))
         throw new BadRequestException('This register is not assigned to your branch');
