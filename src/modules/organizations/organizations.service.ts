@@ -721,6 +721,8 @@ export class OrganizationsService {
     const root = this.asObject(organization.onboardingData);
     const admin = this.asObject(root.admin as Prisma.JsonValue);
     const hierarchy = this.asObject(admin.branches as Prisma.JsonValue);
+    const hierarchyConfig = this.asObject(hierarchy.hierarchy as Prisma.JsonValue);
+    const hierarchyLevels = hierarchyConfig.levels === 2 ? 2 : 3;
     const states = Array.isArray(hierarchy.states)
       ? (hierarchy.states as Array<Record<string, unknown>>)
       : [];
@@ -739,7 +741,9 @@ export class OrganizationsService {
     if (!exists) throw new NotFoundException('Organisation location not found');
     const regionIds =
       type === 'state'
-        ? regions.filter((item) => item.stateId === id).map((item) => String(item.id))
+        ? hierarchyLevels === 2
+          ? [id]
+          : regions.filter((item) => item.stateId === id).map((item) => String(item.id))
         : type === 'region'
           ? [id]
           : [];
@@ -949,6 +953,13 @@ export class OrganizationsService {
     }
     if (section === 'branches' && Array.isArray(items)) {
       const branches = items.map((item) => item as Record<string, unknown>);
+      const hierarchy = data.hierarchy && typeof data.hierarchy === 'object' && !Array.isArray(data.hierarchy)
+        ? (data.hierarchy as Record<string, unknown>)
+        : {};
+      const hierarchyLevels = hierarchy.levels === 2 ? 2 : 3;
+      const labels = ['topLabel', 'middleLabel', 'locationLabel'];
+      if (labels.some((key) => hierarchy[key] !== undefined && (typeof hierarchy[key] !== 'string' || !String(hierarchy[key]).trim())))
+        throw new BadRequestException('Every location hierarchy label must be a non-empty name');
       const states = Array.isArray(data.states)
         ? data.states.map((item) => item as Record<string, unknown>)
         : [];
@@ -975,7 +986,7 @@ export class OrganizationsService {
         const stateNames = states.map((item) => String(item.name).trim().toLowerCase());
         if (new Set(stateNames).size !== stateNames.length)
           throw new ConflictException('State names must be unique');
-        if (
+        if (hierarchyLevels === 3 && (
           regions.some(
             (item) =>
               !validId(item.id) ||
@@ -983,7 +994,7 @@ export class OrganizationsService {
               typeof item.name !== 'string' ||
               !item.name.trim(),
           )
-        )
+        ))
           throw new BadRequestException('Every region requires a valid state and name');
         if (new Set(regionIds).size !== regionIds.length)
           throw new ConflictException('Region ids must be unique');
@@ -992,8 +1003,9 @@ export class OrganizationsService {
         );
         if (new Set(regionKeys).size !== regionKeys.length)
           throw new ConflictException('Region names must be unique within a state');
-        if (branches.some((item) => !validId(item.id) || !regionIds.includes(item.regionId)))
-          throw new BadRequestException('Every branch requires a valid region');
+        const validParentIds = hierarchyLevels === 2 ? stateIds : regionIds;
+        if (branches.some((item) => !validId(item.id) || !validParentIds.includes(item.regionId)))
+          throw new BadRequestException('Every operating location requires a valid parent location');
       }
       const names = branches.map((item) => (typeof item.name === 'string' ? item.name.trim() : ''));
       if (names.some((name) => !name))
