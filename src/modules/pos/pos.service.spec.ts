@@ -49,7 +49,7 @@ describe('POS register staff assignment', () => {
       membership: { findFirst: jest.fn().mockResolvedValue({ id: 'member-a' }) },
     } as never);
 
-    const branches = await service.branches('org-a', 'staff-a', 'MEMBER');
+    const branches = await service.branches('org-a', 'staff-a', 'ADMIN');
 
     expect(branches.map((branch) => branch.id)).toEqual(['branch-a']);
   });

@@ -78,7 +78,7 @@ export class PosService {
       where: { id: org },
       select: { onboardingData: true },
     });
-    const membership = ['OWNER', 'ADMIN'].includes(role)
+    const membership = role === 'OWNER'
       ? null
       : await this.db.membership.findFirst({
           where: { organizationId: org, userId: staffId, user: { isActive: true } },
@@ -93,7 +93,7 @@ export class PosService {
     return branches.filter(
       (branch) =>
         branch.status !== 'Inactive' &&
-        (['OWNER', 'ADMIN'].includes(role) ||
+        (role === 'OWNER' ||
           (membership &&
             Array.isArray(branch.managerIds) &&
             branch.managerIds.includes(membership.id))),
@@ -105,7 +105,7 @@ export class PosService {
       where: {
         organizationId: org,
         isActive: true,
-        ...(!['OWNER', 'ADMIN'].includes(role)
+        ...(role !== 'OWNER'
           ? {
               OR: [
                 { branchId: { in: accessibleBranches.map((branch) => String(branch.id)) } },

@@ -13,9 +13,9 @@ export class PosController {
   @Get('sales') list(@CurrentUser() u: AuthUser, @Query() query: ListPosSalesDto) { return this.pos.list(u.organizationId, query); }
   @Get('registers') registers(@CurrentUser() u: AuthUser) { return this.pos.registers(u.organizationId, u.sub, u.role); }
   @Get('branches') branches(@CurrentUser() u: AuthUser) { return this.pos.branches(u.organizationId, u.sub, u.role); }
-  @Roles(Role.OWNER, Role.ADMIN)
+  @Roles(Role.OWNER)
   @Post('registers') createRegister(@CurrentUser() u: AuthUser, @Body() data: CreateRegisterDto) { return this.pos.createRegister(u.organizationId, data); }
-  @Roles(Role.OWNER, Role.ADMIN)
+  @Roles(Role.OWNER)
   @Patch('registers/:id/staff') assignRegisterStaff(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() data: AssignRegisterStaffDto) { return this.pos.assignRegisterStaff(u.organizationId, id, data.assignedStaffId, data.branchId); }
   @Get('shifts/current') currentShift(@CurrentUser() u: AuthUser) { return this.pos.currentShift(u.organizationId, u.sub); }
   @Post('shifts') openShift(@CurrentUser() u: AuthUser, @Body() data: OpenShiftDto) { return this.pos.openShift(u.organizationId, u.sub, data); }
