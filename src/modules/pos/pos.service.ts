@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../database/prisma.service.ts';
@@ -58,13 +63,34 @@ export class PosService {
       customerId?: string;
       search?: string;
     },
+    staffId?: string,
+    role = 'OWNER',
   ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
     const endDate = query.to ? new Date(query.to) : undefined;
     if (endDate && /^\d{4}-\d{2}-\d{2}$/.test(query.to!)) endDate.setDate(endDate.getDate() + 1);
+    const accessibleBranches =
+      staffId && role !== 'OWNER' ? await this.branches(org, staffId, role) : [];
+    const restrictions: Prisma.PosSaleWhereInput[] = [];
+    if (staffId && role !== 'OWNER')
+      restrictions.push({
+        OR: [
+          { cashierId: staffId },
+          { branchId: { in: accessibleBranches.map((branch) => String(branch.id)) } },
+        ],
+      });
+    if (query.search)
+      restrictions.push({
+        OR: [
+          { receiptNumber: { contains: query.search, mode: 'insensitive' } },
+          { customer: { displayName: { contains: query.search, mode: 'insensitive' } } },
+        ],
+      });
     const where: Prisma.PosSaleWhereInput = {
       organizationId: org,
+      status: 'COMPLETED',
+      ...(restrictions.length ? { AND: restrictions } : {}),
       ...(query.customerId ? { customerId: query.customerId } : {}),
       ...(query.from || query.to
         ? {
@@ -72,14 +98,6 @@ export class PosService {
               ...(query.from ? { gte: new Date(query.from) } : {}),
               ...(endDate ? { lt: endDate } : {}),
             },
-          }
-        : {}),
-      ...(query.search
-        ? {
-            OR: [
-              { receiptNumber: { contains: query.search, mode: 'insensitive' } },
-              { customer: { displayName: { contains: query.search, mode: 'insensitive' } } },
-            ],
           }
         : {}),
     };
@@ -100,9 +118,22 @@ export class PosService {
       meta: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
     };
   }
-  async receipt(org: string, saleId: string) {
+  async receipt(org: string, saleId: string, staffId?: string, role = 'OWNER') {
+    const accessibleBranches =
+      staffId && role !== 'OWNER' ? await this.branches(org, staffId, role) : [];
     const sale = await this.db.posSale.findFirst({
-      where: { id: saleId, organizationId: org },
+      where: {
+        id: saleId,
+        organizationId: org,
+        ...(staffId && role !== 'OWNER'
+          ? {
+              OR: [
+                { cashierId: staffId },
+                { branchId: { in: accessibleBranches.map((branch) => String(branch.id)) } },
+              ],
+            }
+          : {}),
+      },
       include: { items: true, payments: true, customer: true },
     });
     if (!sale) throw new NotFoundException('Sale receipt not found');
@@ -138,7 +169,14 @@ export class PosService {
       html: this.receiptEmailHtml(sale),
     });
     await this.db.posAuditLog.create({
-      data: { organizationId: org, actorId, action: 'RECEIPT_EMAILED', entityType: 'PosSale', entityId: saleId, metadata: { email } },
+      data: {
+        organizationId: org,
+        actorId,
+        action: 'RECEIPT_EMAILED',
+        entityType: 'PosSale',
+        entityId: saleId,
+        metadata: { email },
+      },
     });
     return { sent: true };
   }
@@ -158,11 +196,22 @@ export class PosService {
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ to: phone, from: sender, message: `${String((sale.receipt as Record<string, unknown>).organizationName)} receipt ${String(sale.receiptNumber)}: ${String((sale.receipt as Record<string, unknown>).digitalUrl)}` }),
+      body: JSON.stringify({
+        to: phone,
+        from: sender,
+        message: `${String((sale.receipt as Record<string, unknown>).organizationName)} receipt ${String(sale.receiptNumber)}: ${String((sale.receipt as Record<string, unknown>).digitalUrl)}`,
+      }),
     });
     if (!response.ok) throw new ServiceUnavailableException('Unable to send SMS receipt');
     await this.db.posAuditLog.create({
-      data: { organizationId: org, actorId, action: 'RECEIPT_SMS_SENT', entityType: 'PosSale', entityId: saleId, metadata: { phone } },
+      data: {
+        organizationId: org,
+        actorId,
+        action: 'RECEIPT_SMS_SENT',
+        entityType: 'PosSale',
+        entityId: saleId,
+        metadata: { phone },
+      },
     });
     return { sent: true };
   }
@@ -171,12 +220,13 @@ export class PosService {
       where: { id: org },
       select: { onboardingData: true },
     });
-    const membership = role === 'OWNER'
-      ? null
-      : await this.db.membership.findFirst({
-          where: { organizationId: org, userId: staffId, user: { isActive: true } },
-          select: { id: true },
-        });
+    const membership =
+      role === 'OWNER'
+        ? null
+        : await this.db.membership.findFirst({
+            where: { organizationId: org, userId: staffId, user: { isActive: true } },
+            select: { id: true },
+          });
     const root = this.asObject(organization?.onboardingData);
     const admin = this.asObject(root.admin);
     const hierarchy = this.asObject(admin.branches);
@@ -232,7 +282,13 @@ export class PosService {
   }
   async createRegister(
     org: string,
-    data: { warehouseId: string; assignedStaffId: string; branchId: string; code: string; name: string },
+    data: {
+      warehouseId: string;
+      assignedStaffId: string;
+      branchId: string;
+      code: string;
+      name: string;
+    },
   ) {
     const [warehouse, membership] = await Promise.all([
       this.db.warehouse.findFirst({
@@ -247,7 +303,8 @@ export class PosService {
       }),
     ]);
     if (!warehouse) throw new BadRequestException('Select an active warehouse for this register');
-    if (!membership) throw new BadRequestException('Select an active staff member for this register');
+    if (!membership)
+      throw new BadRequestException('Select an active staff member for this register');
     await this.requireBranch(org, data.branchId);
     return this.db.posRegister.create({
       data: { ...data, organizationId: org },
@@ -264,13 +321,16 @@ export class PosService {
     branchId: string,
   ) {
     const [register, membership] = await Promise.all([
-      this.db.posRegister.findFirst({ where: { id: registerId, organizationId: org, isActive: true } }),
+      this.db.posRegister.findFirst({
+        where: { id: registerId, organizationId: org, isActive: true },
+      }),
       this.db.membership.findFirst({
         where: { organizationId: org, userId: assignedStaffId, user: { isActive: true } },
       }),
     ]);
     if (!register) throw new NotFoundException('Active register not found');
-    if (!membership) throw new BadRequestException('Select an active staff member for this register');
+    if (!membership)
+      throw new BadRequestException('Select an active staff member for this register');
     await this.requireBranch(org, branchId);
     return this.db.posRegister.update({
       where: { id: register.id },
@@ -408,9 +468,7 @@ export class PosService {
         });
       }
       if (!shift.register.isActive || !shift.register.warehouse.isActive)
-        throw new BadRequestException(
-          'Select an active register before completing a sale',
-        );
+        throw new BadRequestException('Select an active register before completing a sale');
       if (!(await this.canUseRegister(org, cashierId, shift.register)))
         throw new BadRequestException('This register is not assigned to your branch');
       const saleBranchId = shift.register.branchId ?? data.branchId;
@@ -607,7 +665,9 @@ export class PosService {
       : [];
     const branch = branches.find((item) => item.id === sale.branchId);
     const token = String(sale.receiptToken || sale.id);
-    const appUrl = (this.config?.get<string>('PUBLIC_APP_URL') || 'https://cephas-books.onrender.com').replace(/\/$/, '');
+    const appUrl = (
+      this.config?.get<string>('PUBLIC_APP_URL') || 'https://cephas-books.onrender.com'
+    ).replace(/\/$/, '');
     return {
       ...sale,
       receipt: {
@@ -616,14 +676,17 @@ export class PosService {
         organizationPhone: String(profile.phone || business.phone || ''),
         organizationAddress: String(profile.address || business.address || ''),
         organizationWebsite: String(profile.website || business.website || ''),
-        returnPolicy: String(profile.returnPolicy || 'Returns are subject to the business return policy.'),
+        returnPolicy: String(
+          profile.returnPolicy || 'Returns are subject to the business return policy.',
+        ),
         branchName: String(branch?.name || ''),
         branchAddress: String(branch?.address || ''),
         branchPhone: String(branch?.phone || ''),
         register: register || null,
         cashier: cashier
           ? {
-              name: [cashier.firstName, cashier.lastName].filter(Boolean).join(' ') || cashier.email,
+              name:
+                [cashier.firstName, cashier.lastName].filter(Boolean).join(' ') || cashier.email,
               email: cashier.email,
             }
           : null,
@@ -636,13 +699,21 @@ export class PosService {
   private receiptEmailHtml(sale: Record<string, unknown>) {
     const receipt = sale.receipt as Record<string, unknown>;
     const items = (sale.items as Array<Record<string, unknown>>)
-      .map((item) => `<tr><td>${this.escapeHtml(String(item.description))}</td><td>${this.escapeHtml(String(item.quantity))}</td><td>${this.escapeHtml(String(item.lineTotal))}</td></tr>`)
+      .map(
+        (item) =>
+          `<tr><td>${this.escapeHtml(String(item.description))}</td><td>${this.escapeHtml(String(item.quantity))}</td><td>${this.escapeHtml(String(item.lineTotal))}</td></tr>`,
+      )
       .join('');
     return `<h2>${this.escapeHtml(String(receipt.organizationName))}</h2><p>Receipt ${this.escapeHtml(String(sale.receiptNumber))}</p><p>${this.escapeHtml(String(receipt.branchName || ''))}</p><table><thead><tr><th>Item</th><th>Quantity</th><th>Total</th></tr></thead><tbody>${items}</tbody></table><p><strong>Total: ${this.escapeHtml(String(sale.currency))} ${this.escapeHtml(String(sale.total))}</strong></p><p><a href="${this.escapeHtml(String(receipt.digitalUrl))}">View digital receipt</a></p>`;
   }
 
   private escapeHtml(value: string) {
-    return value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character] || character);
+    return value.replace(
+      /[&<>"']/g,
+      (character) =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character] ||
+        character,
+    );
   }
 
   private async requireBranch(org: string, branchId: string) {
@@ -883,5 +954,4 @@ export class PosService {
       return result;
     });
   }
-
 }

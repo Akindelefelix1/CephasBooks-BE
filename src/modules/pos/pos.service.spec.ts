@@ -5,15 +5,13 @@ import { assertSaleQuantity, calculatePosLine, PosService } from './pos.service.
 
 describe('POS sale quantities', () => {
   it('allows whole quantities for every product', () => {
-    expect(() =>
-      assertSaleQuantity({ name: 'Rice', allowFractionalSale: false }, 5),
-    ).not.toThrow();
+    expect(() => assertSaleQuantity({ name: 'Rice', allowFractionalSale: false }, 5)).not.toThrow();
   });
 
   it('rejects fractional quantities for whole-unit products', () => {
-    expect(() =>
-      assertSaleQuantity({ name: 'Milk', allowFractionalSale: false }, 5.5),
-    ).toThrow(BadRequestException);
+    expect(() => assertSaleQuantity({ name: 'Milk', allowFractionalSale: false }, 5.5)).toThrow(
+      BadRequestException,
+    );
   });
 
   it('allows half-unit quantities when enabled', () => {
@@ -23,9 +21,9 @@ describe('POS sale quantities', () => {
   });
 
   it('rejects quantities smaller than half-unit increments', () => {
-    expect(() =>
-      assertSaleQuantity({ name: 'Fabric', allowFractionalSale: true }, 5.25),
-    ).toThrow(BadRequestException);
+    expect(() => assertSaleQuantity({ name: 'Fabric', allowFractionalSale: true }, 5.25)).toThrow(
+      BadRequestException,
+    );
   });
 });
 
@@ -53,6 +51,50 @@ describe('POS line discounts', () => {
 });
 
 describe('POS register staff assignment', () => {
+  it('limits completed sales history to the signed-in manager branches or own sales', async () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const service = new PosService({
+      organization: {
+        findUnique: jest.fn().mockResolvedValue({
+          onboardingData: {
+            admin: {
+              branches: {
+                items: [
+                  { id: 'branch-a', name: 'Assigned', status: 'Active', managerIds: ['member-a'] },
+                  { id: 'branch-b', name: 'Other', status: 'Active', managerIds: ['member-b'] },
+                ],
+              },
+            },
+          },
+        }),
+      },
+      membership: { findFirst: jest.fn().mockResolvedValue({ id: 'member-a' }) },
+      posSale: { findMany, count: jest.fn().mockResolvedValue(0) },
+      $transaction: jest
+        .fn()
+        .mockImplementation((requests: Array<Promise<unknown>>) => Promise.all(requests)),
+    } as never);
+
+    await service.list('org-a', { search: 'POS-1' }, 'staff-a', 'ADMIN');
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          organizationId: 'org-a',
+          status: 'COMPLETED',
+          AND: expect.arrayContaining([
+            expect.objectContaining({
+              OR: expect.arrayContaining([
+                { cashierId: 'staff-a' },
+                { branchId: { in: ['branch-a'] } },
+              ]),
+            }),
+          ]),
+        }),
+      }),
+    );
+  });
+
   it('returns the active branches assigned to the signed-in member', async () => {
     const service = new PosService({
       organization: {
@@ -63,7 +105,12 @@ describe('POS register staff assignment', () => {
                 items: [
                   { id: 'branch-a', name: 'Assigned', status: 'Active', managerIds: ['member-a'] },
                   { id: 'branch-b', name: 'Other', status: 'Active', managerIds: ['member-b'] },
-                  { id: 'branch-c', name: 'Inactive', status: 'Inactive', managerIds: ['member-a'] },
+                  {
+                    id: 'branch-c',
+                    name: 'Inactive',
+                    status: 'Inactive',
+                    managerIds: ['member-a'],
+                  },
                 ],
               },
             },
