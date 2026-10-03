@@ -41,6 +41,12 @@ export class OperationsController {
   @Get('products') products(@CurrentUser() u: AuthUser, @Query() q: Record<string, string>) {
     return this.operations.products(u.organizationId, q);
   }
+  @Get('products-page') productsPage(
+    @CurrentUser() u: AuthUser,
+    @Query() q: Record<string, string>,
+  ) {
+    return this.operations.productsPage(u.organizationId, q);
+  }
   @Get('products/:id') productDetails(
     @CurrentUser() u: AuthUser,
     @Param('id', ParseUUIDPipe) id: string,

@@ -72,9 +72,7 @@ export class OperationsService {
               ],
             }
           : {}),
-        ...(q.category
-          ? { category: { equals: q.category, mode: 'insensitive' } }
-          : {}),
+        ...(q.category ? { category: { equals: q.category, mode: 'insensitive' } } : {}),
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -107,6 +105,19 @@ export class OperationsService {
         (product) => product.type === 'PRODUCT' && product.stockQuantity.lte(0),
       );
     return valuedProducts;
+  }
+
+  async productsPage(org: string, q: Record<string, string>) {
+    const page = Math.max(1, Number(q.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(q.limit) || 15));
+    const products = await this.products(org, q);
+    const total = products.length;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const safePage = Math.min(page, totalPages);
+    return {
+      data: products.slice((safePage - 1) * limit, safePage * limit),
+      meta: { page: safePage, limit, total, totalPages },
+    };
   }
 
   async productDetails(org: string, id: string) {
@@ -236,9 +247,7 @@ export class OperationsService {
       throw new BadRequestException('Services cannot have opening stock');
     if (openingQuantity > 0) {
       const quantity = new Prisma.Decimal(openingQuantity);
-      const valid = d.allowFractionalSale
-        ? quantity.mul(2).isInteger()
-        : quantity.isInteger();
+      const valid = d.allowFractionalSale ? quantity.mul(2).isInteger() : quantity.isInteger();
       if (!valid)
         throw new BadRequestException(
           d.allowFractionalSale
@@ -253,8 +262,7 @@ export class OperationsService {
             select: { id: true },
           })
         : null;
-    const stockWarehouseId =
-      defaultWarehouseId ?? openingWarehouseId ?? organizationDefault?.id;
+    const stockWarehouseId = defaultWarehouseId ?? openingWarehouseId ?? organizationDefault?.id;
     if (openingQuantity > 0 && !stockWarehouseId)
       throw new BadRequestException('Select a warehouse for opening stock');
     return this.db.$transaction(async (tx) => {
@@ -360,9 +368,9 @@ export class OperationsService {
         const target = new Prisma.Decimal(availableQuantity);
         const delta = target.sub(existing);
         if (!delta.isZero()) {
-          const warehouseStock = this.stockMap(
-            rows.filter((row) => row.warehouseId === defaultWarehouseId),
-          ).get(id) ?? new Prisma.Decimal(0);
+          const warehouseStock =
+            this.stockMap(rows.filter((row) => row.warehouseId === defaultWarehouseId)).get(id) ??
+            new Prisma.Decimal(0);
           if (delta.lt(0) && warehouseStock.lt(delta.abs()))
             throw new BadRequestException(
               `The default warehouse only has ${warehouseStock.toString()} available. Transfer stock into it or adjust each warehouse separately.`,
@@ -402,16 +410,15 @@ export class OperationsService {
               number: `AUTO-STOCK-COUNT-${adjustment.id}`,
               journalDate: now,
               description: `Stock count correction for ${updated.sku}`,
-              lines:
-                delta.gt(0)
-                  ? [
-                      { accountCode: '1300', debit: value, credit: 0, memo: updated.name },
-                      { accountCode: '4900', debit: 0, credit: value, memo: adjustment.reason },
-                    ]
-                  : [
-                      { accountCode: '5900', debit: value, credit: 0, memo: adjustment.reason },
-                      { accountCode: '1300', debit: 0, credit: value, memo: updated.name },
-                    ],
+              lines: delta.gt(0)
+                ? [
+                    { accountCode: '1300', debit: value, credit: 0, memo: updated.name },
+                    { accountCode: '4900', debit: 0, credit: value, memo: adjustment.reason },
+                  ]
+                : [
+                    { accountCode: '5900', debit: value, credit: 0, memo: adjustment.reason },
+                    { accountCode: '1300', debit: 0, credit: value, memo: updated.name },
+                  ],
             });
         }
       }
@@ -786,16 +793,15 @@ export class OperationsService {
             number: `AUTO-STOCK-ADJUSTMENT-${adjustment.id}`,
             journalDate: adjustment.adjustmentDate,
             description: `Inventory adjustment ${adjustment.reference}`,
-            lines:
-              adjustment.quantityDelta.gt(0)
-                ? [
-                    { accountCode: '1300', debit: value, credit: 0, memo: 'Inventory increase' },
-                    { accountCode: '4900', debit: 0, credit: value, memo: adjustment.reason },
-                  ]
-                : [
-                    { accountCode: '5900', debit: value, credit: 0, memo: adjustment.reason },
-                    { accountCode: '1300', debit: 0, credit: value, memo: 'Inventory decrease' },
-                  ],
+            lines: adjustment.quantityDelta.gt(0)
+              ? [
+                  { accountCode: '1300', debit: value, credit: 0, memo: 'Inventory increase' },
+                  { accountCode: '4900', debit: 0, credit: value, memo: adjustment.reason },
+                ]
+              : [
+                  { accountCode: '5900', debit: value, credit: 0, memo: adjustment.reason },
+                  { accountCode: '1300', debit: 0, credit: value, memo: 'Inventory decrease' },
+                ],
           });
       }
       return updated;

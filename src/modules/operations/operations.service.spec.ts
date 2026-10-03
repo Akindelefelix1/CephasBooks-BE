@@ -104,6 +104,25 @@ describe('OperationsService', () => {
     expect(products.map((product) => product.id)).toEqual(['out-product']);
   });
 
+  it('returns products in pages of 15 by default', async () => {
+    const products = Array.from({ length: 37 }, (_, index) => ({
+      id: `product-${index + 1}`,
+      type: 'PRODUCT',
+      salePrice: new Prisma.Decimal(100),
+      reorderLevel: new Prisma.Decimal(5),
+    }));
+    const service = new OperationsService({
+      product: { findMany: jest.fn().mockResolvedValue(products) },
+      stockMovement: { findMany: jest.fn().mockResolvedValue([]) },
+    } as never);
+
+    const result = await service.productsPage('org-a', { page: '2' });
+
+    expect(result.data).toHaveLength(15);
+    expect(result.data[0].id).toBe('product-16');
+    expect(result.meta).toEqual({ page: 2, limit: 15, total: 37, totalPages: 3 });
+  });
+
   it('uses the organization default warehouse for a new product', async () => {
     const create = jest.fn().mockImplementation((request) => Promise.resolve(request.data));
     const tx = {
