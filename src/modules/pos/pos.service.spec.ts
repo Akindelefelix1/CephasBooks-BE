@@ -157,6 +157,22 @@ describe('POS register staff assignment', () => {
     );
   });
 
+  it('prevents deactivating a register with an open shift', async () => {
+    const update = jest.fn();
+    const service = new PosService({
+      posRegister: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'register-a' }),
+        update,
+      },
+      posShift: { findFirst: jest.fn().mockResolvedValue({ id: 'shift-a' }) },
+    } as never);
+
+    await expect(
+      service.updateRegister('org-a', 'register-a', { isActive: false }),
+    ).rejects.toThrow('Close the open cashier shift before changing this register');
+    expect(update).not.toHaveBeenCalled();
+  });
+
   it('prevents another staff member from opening an assigned register', async () => {
     const service = new PosService({
       posRegister: {

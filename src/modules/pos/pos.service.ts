@@ -247,9 +247,9 @@ export class PosService {
     return this.db.posRegister.findMany({
       where: {
         organizationId: org,
-        isActive: true,
         ...(role !== 'OWNER'
           ? {
+              isActive: true,
               OR: [
                 { branchId: { in: accessibleBranches.map((branch) => String(branch.id)) } },
                 { branchId: null, assignedStaffId: staffId },
@@ -260,6 +260,13 @@ export class PosService {
       include: {
         warehouse: true,
         assignedStaff: { select: { id: true, email: true, firstName: true, lastName: true } },
+        shifts: {
+          where: { status: 'OPEN' },
+          include: {
+            cashier: { select: { id: true, email: true, firstName: true, lastName: true } },
+          },
+          take: 1,
+        },
       },
       orderBy: { code: 'asc' },
     });
@@ -286,6 +293,10 @@ export class PosService {
       warehouseId: string;
       assignedStaffId: string;
       branchId: string;
+      defaultCashAccountId?: string | null;
+      defaultCardAccountId?: string | null;
+      defaultBankAccountId?: string | null;
+      terminalId?: string | null;
       code: string;
       name: string;
     },
@@ -306,8 +317,93 @@ export class PosService {
     if (!membership)
       throw new BadRequestException('Select an active staff member for this register');
     await this.requireBranch(org, data.branchId);
+    await this.requireRegisterAccounts(org, [
+      data.defaultCashAccountId,
+      data.defaultCardAccountId,
+      data.defaultBankAccountId,
+    ]);
     return this.db.posRegister.create({
-      data: { ...data, organizationId: org },
+      data: {
+        ...data,
+        terminalId: data.terminalId?.trim() || null,
+        organizationId: org,
+      },
+      include: {
+        warehouse: true,
+        assignedStaff: { select: { id: true, email: true, firstName: true, lastName: true } },
+      },
+    });
+  }
+  async updateRegister(
+    org: string,
+    registerId: string,
+    data: {
+      warehouseId?: string;
+      assignedStaffId?: string;
+      branchId?: string;
+      defaultCashAccountId?: string | null;
+      defaultCardAccountId?: string | null;
+      defaultBankAccountId?: string | null;
+      terminalId?: string | null;
+      code?: string;
+      name?: string;
+      isActive?: boolean;
+    },
+  ) {
+    const register = await this.db.posRegister.findFirst({
+      where: { id: registerId, organizationId: org },
+    });
+    if (!register) throw new NotFoundException('Register not found');
+    const changesConfiguration = [
+      data.warehouseId,
+      data.assignedStaffId,
+      data.branchId,
+      data.defaultCashAccountId,
+      data.defaultCardAccountId,
+      data.defaultBankAccountId,
+      data.terminalId,
+      data.code,
+      data.name,
+    ].some((value) => value !== undefined);
+    if (data.isActive === false || changesConfiguration) {
+      const openShift = await this.db.posShift.findFirst({
+        where: { registerId, organizationId: org, status: 'OPEN' },
+        select: { id: true },
+      });
+      if (openShift)
+        throw new BadRequestException('Close the open cashier shift before changing this register');
+    }
+    if (data.warehouseId) {
+      const warehouse = await this.db.warehouse.findFirst({
+        where: { id: data.warehouseId, organizationId: org, isActive: true },
+        select: { id: true },
+      });
+      if (!warehouse) throw new BadRequestException('Select an active warehouse for this register');
+    }
+    if (data.assignedStaffId) {
+      const membership = await this.db.membership.findFirst({
+        where: {
+          organizationId: org,
+          userId: data.assignedStaffId,
+          user: { isActive: true },
+        },
+        select: { id: true },
+      });
+      if (!membership)
+        throw new BadRequestException('Select an active staff member for this register');
+    }
+    if (data.branchId) await this.requireBranch(org, data.branchId);
+    await this.requireRegisterAccounts(org, [
+      data.defaultCashAccountId,
+      data.defaultCardAccountId,
+      data.defaultBankAccountId,
+    ]);
+    return this.db.posRegister.update({
+      where: { id: register.id },
+      data: {
+        ...data,
+        ...(data.terminalId === undefined ? {} : { terminalId: data.terminalId?.trim() || null }),
+      },
       include: {
         warehouse: true,
         assignedStaff: { select: { id: true, email: true, firstName: true, lastName: true } },
@@ -329,6 +425,12 @@ export class PosService {
       }),
     ]);
     if (!register) throw new NotFoundException('Active register not found');
+    const openShift = await this.db.posShift.findFirst({
+      where: { registerId, organizationId: org, status: 'OPEN' },
+      select: { id: true },
+    });
+    if (openShift)
+      throw new BadRequestException('Close the open cashier shift before changing this register');
     if (!membership)
       throw new BadRequestException('Select an active staff member for this register');
     await this.requireBranch(org, branchId);
@@ -720,6 +822,17 @@ export class PosService {
     const branches = await this.branches(org, '', 'OWNER');
     if (!branches.some((branch) => branch.id === branchId))
       throw new BadRequestException('Select an active branch for this register');
+  }
+
+  private async requireRegisterAccounts(org: string, accountIds: Array<string | null | undefined>) {
+    const ids = [...new Set(accountIds.filter((id): id is string => Boolean(id)))];
+    if (!ids.length) return;
+    const accounts = await this.db.bankAccount.findMany({
+      where: { organizationId: org, id: { in: ids }, isActive: true },
+      select: { id: true },
+    });
+    if (accounts.length !== ids.length)
+      throw new BadRequestException('Select active bank accounts from this organization');
   }
 
   private async canUseRegister(

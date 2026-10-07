@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsEnum,
   IsOptional,
   IsString,
@@ -76,8 +77,24 @@ export class CreateRegisterDto {
   @IsUUID() warehouseId!: string;
   @IsUUID() assignedStaffId!: string;
   @IsUUID() branchId!: string;
+  @IsOptional() @IsUUID() defaultCashAccountId?: string | null;
+  @IsOptional() @IsUUID() defaultCardAccountId?: string | null;
+  @IsOptional() @IsUUID() defaultBankAccountId?: string | null;
+  @IsOptional() @IsString() @MaxLength(128) terminalId?: string | null;
   @IsString() @MaxLength(32) code!: string;
   @IsString() @MaxLength(120) name!: string;
+}
+export class UpdateRegisterDto {
+  @IsOptional() @IsUUID() warehouseId?: string;
+  @IsOptional() @IsUUID() assignedStaffId?: string;
+  @IsOptional() @IsUUID() branchId?: string;
+  @IsOptional() @IsUUID() defaultCashAccountId?: string | null;
+  @IsOptional() @IsUUID() defaultCardAccountId?: string | null;
+  @IsOptional() @IsUUID() defaultBankAccountId?: string | null;
+  @IsOptional() @IsString() @MaxLength(128) terminalId?: string | null;
+  @IsOptional() @IsString() @MaxLength(32) code?: string;
+  @IsOptional() @IsString() @MaxLength(120) name?: string;
+  @IsOptional() @IsBoolean() isActive?: boolean;
 }
 export class AssignRegisterStaffDto {
   @IsUUID() assignedStaffId!: string;

@@ -13,6 +13,7 @@ import {
   ListPosSalesDto,
   OpenShiftDto,
   ReturnPosSaleDto,
+  UpdateRegisterDto,
   UpdatePosReceiptSignaturesDto,
   VoidPosSaleDto,
 } from './dto/pos.dto.ts';
@@ -60,6 +61,15 @@ export class PosController {
     @Body() data: AssignRegisterStaffDto,
   ) {
     return this.pos.assignRegisterStaff(u.organizationId, id, data.assignedStaffId, data.branchId);
+  }
+  @Roles(Role.OWNER)
+  @Patch('registers/:id')
+  updateRegister(
+    @CurrentUser() u: AuthUser,
+    @Param('id') id: string,
+    @Body() data: UpdateRegisterDto,
+  ) {
+    return this.pos.updateRegister(u.organizationId, id, data);
   }
   @Get('shifts/current') currentShift(@CurrentUser() u: AuthUser) {
     return this.pos.currentShift(u.organizationId, u.sub);

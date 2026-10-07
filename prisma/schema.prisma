@@ -232,6 +232,7 @@ model User {
   notificationReceipts      NotificationReceipt[]
   bankTransactionReversals  BankTransaction[]     @relation("BankTransactionReversedBy")
   assignedPosRegisters      PosRegister[]          @relation("PosRegisterAssignedStaff")
+  cashierPosShifts          PosShift[]            @relation("PosShiftCashier")
 }
 
 model Organization {
@@ -522,6 +523,10 @@ model PosRegister {
   warehouseId    String       @db.Uuid
   assignedStaffId String?      @db.Uuid
   branchId        String?      @db.Uuid
+  defaultCashAccountId String?      @db.Uuid
+  defaultCardAccountId String?      @db.Uuid
+  defaultBankAccountId String?      @db.Uuid
+  terminalId           String?
   code           String
   name           String
   isActive       Boolean      @default(true)
@@ -530,6 +535,9 @@ model PosRegister {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   warehouse      Warehouse    @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
   assignedStaff  User?        @relation("PosRegisterAssignedStaff", fields: [assignedStaffId], references: [id], onDelete: SetNull)
+  defaultCashAccount   BankAccount? @relation("PosRegisterDefaultCashAccount", fields: [defaultCashAccountId], references: [id], onDelete: SetNull)
+  defaultCardAccount   BankAccount? @relation("PosRegisterDefaultCardAccount", fields: [defaultCardAccountId], references: [id], onDelete: SetNull)
+  defaultBankAccount   BankAccount? @relation("PosRegisterDefaultBankAccount", fields: [defaultBankAccountId], references: [id], onDelete: SetNull)
   shifts         PosShift[]
   sales          PosSale[]
 
@@ -554,6 +562,7 @@ model PosShift {
   closeNotes     String?
   organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   register       PosRegister    @relation(fields: [registerId], references: [id], onDelete: Restrict)
+  cashier        User           @relation("PosShiftCashier", fields: [cashierId], references: [id], onDelete: Restrict)
   sales          PosSale[]
 
   @@index([organizationId, cashierId, status])
@@ -924,6 +933,9 @@ model BankAccount {
   updatedAt          DateTime          @updatedAt
   organization       Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   transactions       BankTransaction[]
+  posCashRegisters   PosRegister[]     @relation("PosRegisterDefaultCashAccount")
+  posCardRegisters   PosRegister[]     @relation("PosRegisterDefaultCardAccount")
+  posBankRegisters   PosRegister[]     @relation("PosRegisterDefaultBankAccount")
 
   @@index([organizationId, isActive])
 }
