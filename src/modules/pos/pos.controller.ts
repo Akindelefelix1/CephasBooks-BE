@@ -22,10 +22,20 @@ import {
 export class PosController {
   constructor(private readonly pos: PosService) {}
   @Get('sales') list(@CurrentUser() u: AuthUser, @Query() query: ListPosSalesDto) {
-    return this.pos.list(u.organizationId, query, u.sub, u.role);
+    return this.pos.list(u.organizationId, query, u.sub, u.role, u.permissions);
   }
   @Get('sales/:id/receipt') receipt(@CurrentUser() u: AuthUser, @Param('id') id: string) {
     return this.pos.receipt(u.organizationId, id, u.sub, u.role);
+  }
+  @Roles(Role.OWNER, Role.ADMIN)
+  @Get('audit')
+  auditLog(@CurrentUser() u: AuthUser) {
+    return this.pos.posAudit(u.organizationId);
+  }
+  @Roles(Role.OWNER, Role.ADMIN)
+  @Get('sales/:id/audit')
+  audit(@CurrentUser() u: AuthUser, @Param('id') id: string) {
+    return this.pos.saleAudit(u.organizationId, id);
   }
   @Roles(Role.OWNER, Role.ADMIN)
   @Post('sales/:id/receipt/reprint')
@@ -94,16 +104,14 @@ export class PosController {
   ) {
     return this.pos.updateReceiptSignatures(u.organizationId, id, data);
   }
-  @Post('sales/:id/returns') returnItem(
-    @CurrentUser() u: AuthUser,
-    @Param('id') id: string,
-    @Body() data: ReturnPosSaleDto,
-  ) {
-    return this.pos.returnItem(u.organizationId, u.sub, id, data);
+  @Roles(Role.OWNER, Role.ADMIN)
+  @Post('sales/:id/returns')
+  returnItem(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() data: ReturnPosSaleDto) {
+    return this.pos.returnItem(u.organizationId, u.sub, u.role, id, data);
   }
   @Roles(Role.OWNER, Role.ADMIN)
   @Post('sales/:id/void')
   voidSale(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() data: VoidPosSaleDto) {
-    return this.pos.voidSale(u.organizationId, u.sub, id, data.reason);
+    return this.pos.voidSale(u.organizationId, u.sub, u.role, id, data.reason);
   }
 }

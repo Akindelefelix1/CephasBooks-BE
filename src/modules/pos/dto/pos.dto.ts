@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
@@ -64,6 +64,7 @@ export class ListPosSalesDto {
   @IsOptional() @IsDateString() to?: string;
   @IsOptional() @IsUUID() customerId?: string;
   @IsOptional() @IsString() @MaxLength(120) search?: string;
+  @IsOptional() @Transform(({ value }) => value === 'true') @IsBoolean() includeVoided = false;
 }
 export class OpenShiftDto {
   @IsUUID() registerId!: string;

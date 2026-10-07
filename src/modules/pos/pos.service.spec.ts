@@ -75,13 +75,13 @@ describe('POS register staff assignment', () => {
         .mockImplementation((requests: Array<Promise<unknown>>) => Promise.all(requests)),
     } as never);
 
-    await service.list('org-a', { search: 'POS-1' }, 'staff-a', 'ADMIN');
+    await service.list('org-a', { search: 'POS-1', includeVoided: true }, 'staff-a', 'ADMIN');
 
     expect(findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           organizationId: 'org-a',
-          status: 'COMPLETED',
+          status: { in: ['COMPLETED', 'VOIDED'] },
           AND: expect.arrayContaining([
             expect.objectContaining({
               OR: expect.arrayContaining([
@@ -91,6 +91,38 @@ describe('POS register staff assignment', () => {
             }),
           ]),
         }),
+      }),
+    );
+  });
+
+  it('allows a custom sales manager to include voided sales in history', async () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const service = new PosService({
+      organization: {
+        findUnique: jest.fn().mockResolvedValue({
+          onboardingData: {
+            admin: {
+              branches: {
+                items: [
+                  { id: 'branch-a', name: 'Assigned', status: 'Active', managerIds: ['member-a'] },
+                ],
+              },
+            },
+          },
+        }),
+      },
+      membership: { findFirst: jest.fn().mockResolvedValue({ id: 'member-a' }) },
+      posSale: { findMany, count: jest.fn().mockResolvedValue(0) },
+      $transaction: jest
+        .fn()
+        .mockImplementation((requests: Array<Promise<unknown>>) => Promise.all(requests)),
+    } as never);
+
+    await service.list('org-a', { includeVoided: true }, 'staff-a', 'MEMBER', ['sales.manage']);
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ status: { in: ['COMPLETED', 'VOIDED'] } }),
       }),
     );
   });
@@ -171,6 +203,58 @@ describe('POS register staff assignment', () => {
       service.updateRegister('org-a', 'register-a', { isActive: false }),
     ).rejects.toThrow('Close the open cashier shift before changing this register');
     expect(update).not.toHaveBeenCalled();
+  });
+
+  it('records the cashier and cash variance when closing a shift', async () => {
+    const update = jest.fn().mockResolvedValue({
+      id: 'shift-a',
+      register: { id: 'register-a', code: 'REG-1', name: 'Front desk' },
+      variance: new Prisma.Decimal(15),
+    });
+    const create = jest.fn().mockResolvedValue({});
+    const service = new PosService({
+      posShift: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'shift-a',
+          registerId: 'register-a',
+          openingCash: new Prisma.Decimal(100),
+        }),
+      },
+      posPayment: {
+        aggregate: jest.fn().mockResolvedValue({ _sum: { amount: new Prisma.Decimal(50) } }),
+      },
+      posSale: {
+        aggregate: jest.fn().mockResolvedValue({ _sum: { changeAmount: new Prisma.Decimal(10) } }),
+      },
+      posReturn: {
+        aggregate: jest.fn().mockResolvedValue({ _sum: { amount: new Prisma.Decimal(5) } }),
+      },
+      $transaction: jest.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
+        callback({ posShift: { update }, posAuditLog: { create } }),
+      ),
+    } as never);
+
+    await service.closeShift('org-a', 'cashier-a', 'shift-a', { closingCash: 150 });
+
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'CLOSED',
+          closingCash: 150,
+          expectedCash: new Prisma.Decimal(135),
+          variance: new Prisma.Decimal(15),
+        }),
+      }),
+    );
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: 'SHIFT_CLOSED',
+          actorId: 'cashier-a',
+          entityId: 'shift-a',
+        }),
+      }),
+    );
   });
 
   it('prevents another staff member from opening an assigned register', async () => {

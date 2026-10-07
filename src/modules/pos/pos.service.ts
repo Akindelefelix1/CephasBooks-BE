@@ -62,9 +62,11 @@ export class PosService {
       to?: string;
       customerId?: string;
       search?: string;
+      includeVoided?: boolean;
     },
     staffId?: string,
     role = 'OWNER',
+    permissions: string[] = [],
   ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
@@ -89,7 +91,11 @@ export class PosService {
       });
     const where: Prisma.PosSaleWhereInput = {
       organizationId: org,
-      status: 'COMPLETED',
+      status:
+        query.includeVoided &&
+        (['OWNER', 'ADMIN'].includes(role) || permissions.includes('sales.manage'))
+          ? { in: ['COMPLETED', 'VOIDED'] }
+          : 'COMPLETED',
       ...(restrictions.length ? { AND: restrictions } : {}),
       ...(query.customerId ? { customerId: query.customerId } : {}),
       ...(query.from || query.to
@@ -104,7 +110,12 @@ export class PosService {
     const [data, total] = await this.db.$transaction([
       this.db.posSale.findMany({
         where,
-        include: { items: true, payments: true, customer: true },
+        include: {
+          items: { include: { product: { select: { allowFractionalSale: true } } } },
+          payments: true,
+          customer: true,
+          returns: true,
+        },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
@@ -134,10 +145,43 @@ export class PosService {
             }
           : {}),
       },
-      include: { items: true, payments: true, customer: true },
+      include: {
+        items: { include: { product: { select: { allowFractionalSale: true } } } },
+        payments: true,
+        customer: true,
+        returns: true,
+      },
     });
     if (!sale) throw new NotFoundException('Sale receipt not found');
     return this.decorateReceipt(org, sale as unknown as Record<string, unknown>);
+  }
+  async saleAudit(org: string, saleId: string) {
+    const sale = await this.db.posSale.findFirst({
+      where: { id: saleId, organizationId: org },
+      select: { id: true },
+    });
+    if (!sale) throw new NotFoundException('Sale not found');
+    const returns = await this.db.posReturn.findMany({
+      where: { organizationId: org, saleId },
+      select: { id: true },
+    });
+    return this.db.posAuditLog.findMany({
+      where: {
+        organizationId: org,
+        OR: [
+          { entityType: 'PosSale', entityId: saleId },
+          { entityType: 'PosReturn', entityId: { in: returns.map((item) => item.id) } },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+  posAudit(org: string) {
+    return this.db.posAuditLog.findMany({
+      where: { organizationId: org },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
   }
   async recordReprint(org: string, actorId: string, saleId: string) {
     const sale = await this.receipt(org, saleId);
@@ -465,13 +509,27 @@ export class PosService {
       where: { registerId: register.id, status: 'OPEN' },
     });
     if (existing) throw new BadRequestException('This register already has an open shift');
-    return this.db.posShift.create({
-      data: {
-        organizationId: org,
-        registerId: register.id,
-        cashierId,
-        openingCash: data.openingCash,
-      },
+    return this.db.$transaction(async (tx) => {
+      const shift = await tx.posShift.create({
+        data: {
+          organizationId: org,
+          registerId: register.id,
+          cashierId,
+          openingCash: data.openingCash,
+        },
+        include: { register: { select: { id: true, code: true, name: true } } },
+      });
+      await tx.posAuditLog.create({
+        data: {
+          organizationId: org,
+          actorId: cashierId,
+          action: 'SHIFT_OPENED',
+          entityType: 'PosShift',
+          entityId: shift.id,
+          metadata: { registerId: register.id, openingCash: data.openingCash },
+        },
+      });
+      return shift;
     });
   }
   async closeShift(
@@ -484,21 +542,56 @@ export class PosService {
       where: { id, organizationId: org, cashierId, status: 'OPEN' },
     });
     if (!shift) throw new NotFoundException('Open cashier shift not found');
-    const cash = await this.db.posPayment.aggregate({
-      where: { method: 'CASH', sale: { shiftId: id, status: 'COMPLETED' } },
-      _sum: { amount: true },
-    });
-    const expectedCash = new Prisma.Decimal(shift.openingCash).add(cash._sum.amount ?? 0);
-    return this.db.posShift.update({
-      where: { id },
-      data: {
-        status: 'CLOSED',
-        closingCash: data.closingCash,
-        expectedCash,
-        variance: new Prisma.Decimal(data.closingCash).sub(expectedCash),
-        closeNotes: data.notes,
-        closedAt: new Date(),
-      },
+    const [cash, change, returned] = await Promise.all([
+      this.db.posPayment.aggregate({
+        where: { method: 'CASH', sale: { shiftId: id, status: 'COMPLETED' } },
+        _sum: { amount: true },
+      }),
+      this.db.posSale.aggregate({
+        where: { shiftId: id, status: 'COMPLETED' },
+        _sum: { changeAmount: true },
+      }),
+      this.db.posReturn.aggregate({
+        where: { organizationId: org, sale: { shiftId: id, status: 'COMPLETED' } },
+        _sum: { amount: true },
+      }),
+    ]);
+    const expectedCash = new Prisma.Decimal(shift.openingCash)
+      .add(cash._sum.amount ?? 0)
+      .sub(change._sum.changeAmount ?? 0)
+      .sub(returned._sum.amount ?? 0);
+    return this.db.$transaction(async (tx) => {
+      const closedAt = new Date();
+      const result = await tx.posShift.update({
+        where: { id },
+        data: {
+          status: 'CLOSED',
+          closingCash: data.closingCash,
+          expectedCash,
+          variance: new Prisma.Decimal(data.closingCash).sub(expectedCash),
+          closeNotes: data.notes,
+          closedAt,
+        },
+        include: { register: { select: { id: true, code: true, name: true } } },
+      });
+      await tx.posAuditLog.create({
+        data: {
+          organizationId: org,
+          actorId: cashierId,
+          action: 'SHIFT_CLOSED',
+          entityType: 'PosShift',
+          entityId: id,
+          metadata: {
+            registerId: shift.registerId,
+            openingCash: shift.openingCash.toString(),
+            closingCash: data.closingCash,
+            expectedCash: expectedCash.toString(),
+            variance: result.variance?.toString(),
+            notes: data.notes,
+          },
+        },
+      });
+      return result;
     });
   }
   async complete(
@@ -844,10 +937,23 @@ export class PosService {
     const branches = await this.branches(org, staffId, 'MEMBER');
     return branches.some((branch) => branch.id === register.branchId);
   }
-  async voidSale(org: string, actorId: string, saleId: string, reason: string) {
+  async voidSale(org: string, actorId: string, role: string, saleId: string, reason: string) {
     return this.db.$transaction(async (tx) => {
+      const accessibleBranches = role === 'OWNER' ? [] : await this.branches(org, actorId, role);
       const sale = await tx.posSale.findFirst({
-        where: { id: saleId, organizationId: org, status: 'COMPLETED' },
+        where: {
+          id: saleId,
+          organizationId: org,
+          status: 'COMPLETED',
+          ...(role === 'OWNER'
+            ? {}
+            : {
+                OR: [
+                  { cashierId: actorId },
+                  { branchId: { in: accessibleBranches.map((branch) => String(branch.id)) } },
+                ],
+              }),
+        },
         include: { items: { include: { product: true } }, returns: true },
       });
       if (!sale || !sale.warehouseId) throw new NotFoundException('Completed sale not found');
@@ -966,12 +1072,26 @@ export class PosService {
   async returnItem(
     org: string,
     actorId: string,
+    role: string,
     saleId: string,
     data: { productId: string; quantity: number; reason: string },
   ) {
     return this.db.$transaction(async (tx) => {
+      const accessibleBranches = role === 'OWNER' ? [] : await this.branches(org, actorId, role);
       const sale = await tx.posSale.findFirst({
-        where: { id: saleId, organizationId: org, status: 'COMPLETED' },
+        where: {
+          id: saleId,
+          organizationId: org,
+          status: 'COMPLETED',
+          ...(role === 'OWNER'
+            ? {}
+            : {
+                OR: [
+                  { cashierId: actorId },
+                  { branchId: { in: accessibleBranches.map((branch) => String(branch.id)) } },
+                ],
+              }),
+        },
         include: {
           items: {
             include: {
