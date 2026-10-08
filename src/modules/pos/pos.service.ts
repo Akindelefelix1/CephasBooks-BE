@@ -507,6 +507,8 @@ export class PosService {
     if (!register) throw new NotFoundException('Active register not found');
     if (!membership)
       throw new BadRequestException('Select an active staff member for this register');
+    if (openShift?.cashierId === data.assignedStaffId)
+      throw new BadRequestException('Select a different cashier for this handover');
     await this.requireBranch(org, data.branchId);
 
     let expectedCash = new Prisma.Decimal(0);
