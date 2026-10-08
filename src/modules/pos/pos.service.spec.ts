@@ -257,6 +257,89 @@ describe('POS register staff assignment', () => {
     );
   });
 
+  it('closes the current shift and assigns the next cashier during handover', async () => {
+    const updateShift = jest.fn().mockResolvedValue({});
+    const updateRegister = jest.fn().mockResolvedValue({
+      id: 'register-a',
+      assignedStaffId: 'cashier-b',
+      shifts: [],
+    });
+    const createAudit = jest.fn().mockResolvedValue({});
+    const service = new PosService({
+      posRegister: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'register-a' }),
+      },
+      membership: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'membership-b' }),
+      },
+      posShift: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'shift-a',
+          cashierId: 'cashier-a',
+          openingCash: new Prisma.Decimal(100),
+        }),
+      },
+      posPayment: {
+        aggregate: jest.fn().mockResolvedValue({ _sum: { amount: new Prisma.Decimal(50) } }),
+      },
+      posSale: {
+        aggregate: jest.fn().mockResolvedValue({ _sum: { changeAmount: new Prisma.Decimal(10) } }),
+      },
+      posReturn: {
+        aggregate: jest.fn().mockResolvedValue({ _sum: { amount: new Prisma.Decimal(5) } }),
+      },
+      organization: {
+        findUnique: jest.fn().mockResolvedValue({
+          onboardingData: {
+            admin: { branches: { items: [{ id: 'branch-a', status: 'Active' }] } },
+          },
+        }),
+      },
+      $transaction: jest.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
+        callback({
+          posShift: { update: updateShift },
+          posRegister: { update: updateRegister },
+          posAuditLog: { create: createAudit },
+        }),
+      ),
+    } as never);
+
+    await service.handoverRegister('org-a', 'owner-a', 'register-a', {
+      assignedStaffId: 'cashier-b',
+      branchId: 'branch-a',
+      closingCash: 140,
+      notes: 'Till counted by manager',
+    });
+
+    expect(updateShift).toHaveBeenCalledWith(
+      expect.objectContaining({
+        // Jest's asymmetric matcher is intentionally dynamic.
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        data: expect.objectContaining({
+          status: 'CLOSED',
+          closingCash: 140,
+          expectedCash: new Prisma.Decimal(135),
+          variance: new Prisma.Decimal(5),
+        }),
+      }),
+    );
+    expect(updateRegister).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { assignedStaffId: 'cashier-b', branchId: 'branch-a' },
+      }),
+    );
+    expect(createAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        // Jest's asymmetric matcher is intentionally dynamic.
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        data: expect.objectContaining({
+          action: 'REGISTER_HANDED_OVER',
+          actorId: 'owner-a',
+        }),
+      }),
+    );
+  });
+
   it('prevents another staff member from opening an assigned register', async () => {
     const service = new PosService({
       posRegister: {

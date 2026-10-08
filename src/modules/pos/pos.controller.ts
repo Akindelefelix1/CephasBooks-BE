@@ -10,6 +10,7 @@ import {
   CloseShiftDto,
   CompletePosSaleDto,
   CreateRegisterDto,
+  HandoverRegisterDto,
   ListPosSalesDto,
   OpenShiftDto,
   ReturnPosSaleDto,
@@ -71,6 +72,15 @@ export class PosController {
     @Body() data: AssignRegisterStaffDto,
   ) {
     return this.pos.assignRegisterStaff(u.organizationId, id, data.assignedStaffId, data.branchId);
+  }
+  @Roles(Role.OWNER)
+  @Post('registers/:id/handover')
+  handoverRegister(
+    @CurrentUser() u: AuthUser,
+    @Param('id') id: string,
+    @Body() data: HandoverRegisterDto,
+  ) {
+    return this.pos.handoverRegister(u.organizationId, u.sub, id, data);
   }
   @Roles(Role.OWNER)
   @Patch('registers/:id')

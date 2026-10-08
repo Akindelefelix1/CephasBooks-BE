@@ -101,6 +101,10 @@ export class AssignRegisterStaffDto {
   @IsUUID() assignedStaffId!: string;
   @IsUUID() branchId!: string;
 }
+export class HandoverRegisterDto extends AssignRegisterStaffDto {
+  @Type(() => Number) @IsNumber() @Min(0) closingCash!: number;
+  @IsOptional() @IsString() @MaxLength(1000) notes?: string;
+}
 export class ReturnPosSaleDto {
   @IsUUID() productId!: string;
   @Type(() => Number) @IsNumber() @Min(0.0001) quantity!: number;

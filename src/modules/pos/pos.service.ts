@@ -487,6 +487,100 @@ export class PosService {
       },
     });
   }
+  async handoverRegister(
+    org: string,
+    actorId: string,
+    registerId: string,
+    data: { assignedStaffId: string; branchId: string; closingCash: number; notes?: string },
+  ) {
+    const [register, membership, openShift] = await Promise.all([
+      this.db.posRegister.findFirst({
+        where: { id: registerId, organizationId: org, isActive: true },
+      }),
+      this.db.membership.findFirst({
+        where: { organizationId: org, userId: data.assignedStaffId, user: { isActive: true } },
+      }),
+      this.db.posShift.findFirst({
+        where: { registerId, organizationId: org, status: 'OPEN' },
+      }),
+    ]);
+    if (!register) throw new NotFoundException('Active register not found');
+    if (!membership)
+      throw new BadRequestException('Select an active staff member for this register');
+    await this.requireBranch(org, data.branchId);
+
+    let expectedCash = new Prisma.Decimal(0);
+    if (openShift) {
+      const [cash, change, returned] = await Promise.all([
+        this.db.posPayment.aggregate({
+          where: { method: 'CASH', sale: { shiftId: openShift.id, status: 'COMPLETED' } },
+          _sum: { amount: true },
+        }),
+        this.db.posSale.aggregate({
+          where: { shiftId: openShift.id, status: 'COMPLETED' },
+          _sum: { changeAmount: true },
+        }),
+        this.db.posReturn.aggregate({
+          where: { organizationId: org, sale: { shiftId: openShift.id, status: 'COMPLETED' } },
+          _sum: { amount: true },
+        }),
+      ]);
+      expectedCash = new Prisma.Decimal(openShift.openingCash)
+        .add(cash._sum.amount ?? 0)
+        .sub(change._sum.changeAmount ?? 0)
+        .sub(returned._sum.amount ?? 0);
+    }
+
+    return this.db.$transaction(async (tx) => {
+      if (openShift) {
+        await tx.posShift.update({
+          where: { id: openShift.id },
+          data: {
+            status: 'CLOSED',
+            closingCash: data.closingCash,
+            expectedCash,
+            variance: new Prisma.Decimal(data.closingCash).sub(expectedCash),
+            closeNotes: data.notes,
+            closedAt: new Date(),
+          },
+        });
+      }
+      const updated = await tx.posRegister.update({
+        where: { id: register.id },
+        data: { assignedStaffId: data.assignedStaffId, branchId: data.branchId },
+        include: {
+          warehouse: true,
+          assignedStaff: { select: { id: true, email: true, firstName: true, lastName: true } },
+          shifts: {
+            where: { status: 'OPEN' },
+            include: {
+              cashier: { select: { id: true, email: true, firstName: true, lastName: true } },
+            },
+            take: 1,
+          },
+        },
+      });
+      await tx.posAuditLog.create({
+        data: {
+          organizationId: org,
+          actorId,
+          action: 'REGISTER_HANDED_OVER',
+          entityType: 'PosRegister',
+          entityId: register.id,
+          metadata: {
+            previousCashierId: openShift?.cashierId ?? null,
+            assignedStaffId: data.assignedStaffId,
+            branchId: data.branchId,
+            shiftId: openShift?.id ?? null,
+            closingCash: data.closingCash,
+            expectedCash: expectedCash.toString(),
+            notes: data.notes,
+          },
+        },
+      });
+      return updated;
+    });
+  }
   currentShift(org: string, cashierId: string) {
     return this.db.posShift.findFirst({
       where: { organizationId: org, cashierId, status: 'OPEN' },
