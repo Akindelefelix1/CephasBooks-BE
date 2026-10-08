@@ -79,7 +79,11 @@ export class CommerceService {
   }
 
   async createChannel(org: string, data: CreateCommerceChannelDto) {
-    await this.requireWarehouse(org, data.warehouseId);
+    await Promise.all([
+      this.requireWarehouse(org, data.warehouseId),
+      this.requireBranch(org, data.branchId),
+      this.requireUniqueName(org, data.name),
+    ]);
     return this.db.commerceChannel.create({
       data: { ...data, organizationId: org, name: data.name.trim() },
       include: { warehouse: { select: { id: true, code: true, name: true } } },
@@ -89,7 +93,11 @@ export class CommerceService {
   async updateChannel(org: string, id: string, data: UpdateCommerceChannelDto) {
     const channel = await this.db.commerceChannel.findFirst({ where: { id, organizationId: org } });
     if (!channel) throw new NotFoundException('Sales channel not found');
-    await this.requireWarehouse(org, data.warehouseId);
+    await Promise.all([
+      this.requireWarehouse(org, data.warehouseId),
+      this.requireBranch(org, data.branchId),
+      this.requireUniqueName(org, data.name, id),
+    ]);
     return this.db.commerceChannel.update({
       where: { id },
       data: { ...data, name: data.name.trim() },
@@ -160,7 +168,7 @@ export class CommerceService {
         select: { productId: true, type: true, quantity: true },
       }),
       this.db.commerceChannel.findMany({
-        where: { organizationId: org, status: 'ACTIVE' },
+        where: { organizationId: org, status: 'ACTIVE', syncInventory: true },
         select: { id: true, name: true },
       }),
     ]);
@@ -183,6 +191,40 @@ export class CommerceService {
       select: { id: true },
     });
     if (!warehouse) throw new BadRequestException('Select an active inventory warehouse');
+  }
+
+  private async requireBranch(org: string, branchId?: string | null) {
+    if (!branchId) return;
+    const organization = await this.db.organization.findUnique({
+      where: { id: org },
+      select: { onboardingData: true },
+    });
+    const root = this.asObject(organization?.onboardingData);
+    const admin = this.asObject(root.admin);
+    const hierarchy = this.asObject(admin.branches);
+    const branches = Array.isArray(hierarchy.items)
+      ? (hierarchy.items as Array<Record<string, unknown>>)
+      : [];
+    if (!branches.some((branch) => branch.id === branchId && branch.status !== 'Inactive'))
+      throw new BadRequestException('Select an active organization branch');
+  }
+
+  private async requireUniqueName(org: string, name: string, exceptId?: string) {
+    const duplicate = await this.db.commerceChannel.findFirst({
+      where: {
+        organizationId: org,
+        name: { equals: name.trim(), mode: 'insensitive' },
+        ...(exceptId ? { id: { not: exceptId } } : {}),
+      },
+      select: { id: true },
+    });
+    if (duplicate) throw new BadRequestException('A sales channel with this name already exists');
+  }
+
+  private asObject(value: unknown): Record<string, unknown> {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
   }
 
   private stockMap(rows: Array<{ productId: string; type: string; quantity: Prisma.Decimal }>) {

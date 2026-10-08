@@ -3,7 +3,7 @@ import { IsBoolean, IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-
 export class CreateCommerceChannelDto {
   @IsString() @MaxLength(120) name!: string;
   @IsIn(['POS', 'B2B', 'ONLINE_STORE', 'MARKETPLACE', 'SOCIAL', 'CUSTOM_API']) type!: string;
-  @IsOptional() @IsUUID() branchId?: string;
+  @IsOptional() @IsUUID() branchId?: string | null;
   @IsUUID() warehouseId!: string;
   @IsOptional() @IsBoolean() syncInventory?: boolean;
   @IsOptional() @IsBoolean() syncOrders?: boolean;

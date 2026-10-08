@@ -56,6 +56,8 @@ export class RolesGuard implements CanActivate {
     if (/\/purchases(?:\/|\?|$)/.test(url)) return `purchases.${action}`;
     if (/\/accounting(?:\/|\?|$)/.test(url)) return `accounting.${action}`;
     if (/\/operations(?:\/|\?|$)/.test(url)) return `inventory.${action}`;
+    if (/\/commerce\/orders(?:\/|\?|$)/.test(url)) return `sales.${action}`;
+    if (/\/commerce(?:\/|\?|$)/.test(url)) return `inventory.${action}`;
     if (/\/insights(?:\/|\?|$)/.test(url))
       return method === 'GET' ? 'reports.view' : 'reports.export';
     if (/\/workflow\/approvals(?:\/|\?|$)/.test(url)) return 'approvals.review';
