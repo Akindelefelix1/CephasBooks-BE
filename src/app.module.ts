@@ -17,6 +17,7 @@ import { OperationsModule } from './modules/operations/operations.module.ts';
 import { InsightsModule } from './modules/insights/insights.module.ts';
 import { WorkflowModule } from './modules/workflow/workflow.module.ts';
 import { PosModule } from './modules/pos/pos.module.ts';
+import { CommerceModule } from './modules/commerce/commerce.module.ts';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { PosModule } from './modules/pos/pos.module.ts';
     InsightsModule,
     WorkflowModule,
     PosModule,
+    CommerceModule,
   ],
 })
 export class AppModule {}

@@ -231,7 +231,7 @@ model User {
   auditLogs                 AuditLog[]
   notificationReceipts      NotificationReceipt[]
   bankTransactionReversals  BankTransaction[]     @relation("BankTransactionReversedBy")
-  assignedPosRegisters      PosRegister[]          @relation("PosRegisterAssignedStaff")
+  assignedPosRegisters      PosRegister[]         @relation("PosRegisterAssignedStaff")
   cashierPosShifts          PosShift[]            @relation("PosShiftCashier")
 }
 
@@ -288,6 +288,29 @@ model Organization {
   approvals             ApprovalRequest[]
   notifications         AppNotification[]
   workflowRules         WorkflowRule[]
+  commerceChannels      CommerceChannel[]
+}
+
+model CommerceChannel {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  name           String
+  type           String
+  branchId       String?      @db.Uuid
+  warehouseId    String       @db.Uuid
+  status         String       @default("ACTIVE")
+  syncInventory  Boolean      @default(true)
+  syncOrders     Boolean      @default(true)
+  syncCustomers  Boolean      @default(true)
+  lastSyncedAt   DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  warehouse      Warehouse    @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, name])
+  @@index([organizationId, status])
+  @@index([organizationId, warehouseId])
 }
 
 model DocumentRecord {
@@ -426,66 +449,66 @@ model WorkbookConnection {
 }
 
 model Product {
-  id                 String            @id @default(uuid()) @db.Uuid
-  organizationId     String            @db.Uuid
-  sku                String
-  name               String
-  type               ItemType          @default(PRODUCT)
-  category           String?
-  description        String?
-  unit               String            @default("unit")
-  defaultWarehouseId String?           @db.Uuid
-  salePrice          Decimal           @default(0) @db.Decimal(19, 4)
-  costPrice          Decimal           @default(0) @db.Decimal(19, 4)
-  taxRate            Decimal           @default(0) @db.Decimal(7, 4)
-  reorderLevel       Decimal           @default(0) @db.Decimal(19, 4)
+  id                  String            @id @default(uuid()) @db.Uuid
+  organizationId      String            @db.Uuid
+  sku                 String
+  name                String
+  type                ItemType          @default(PRODUCT)
+  category            String?
+  description         String?
+  unit                String            @default("unit")
+  defaultWarehouseId  String?           @db.Uuid
+  salePrice           Decimal           @default(0) @db.Decimal(19, 4)
+  costPrice           Decimal           @default(0) @db.Decimal(19, 4)
+  taxRate             Decimal           @default(0) @db.Decimal(7, 4)
+  reorderLevel        Decimal           @default(0) @db.Decimal(19, 4)
   allowFractionalSale Boolean           @default(false)
-  isActive           Boolean           @default(true)
-  createdAt          DateTime          @default(now())
-  updatedAt          DateTime          @updatedAt
-  organization       Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  defaultWarehouse   Warehouse?        @relation("ProductDefaultWarehouse", fields: [defaultWarehouseId], references: [id], onDelete: SetNull)
-  movements          StockMovement[]
-  adjustments        StockAdjustment[]
-  posItems           PosSaleItem[]
-  posReturns         PosReturn[]
+  isActive            Boolean           @default(true)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  organization        Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  defaultWarehouse    Warehouse?        @relation("ProductDefaultWarehouse", fields: [defaultWarehouseId], references: [id], onDelete: SetNull)
+  movements           StockMovement[]
+  adjustments         StockAdjustment[]
+  posItems            PosSaleItem[]
+  posReturns          PosReturn[]
 
   @@unique([organizationId, sku])
   @@index([organizationId, type, isActive])
 }
 
 model PosSale {
-  id                 String        @id @default(uuid()) @db.Uuid
-  organizationId     String        @db.Uuid
-  branchId           String?       @db.Uuid
-  customerId         String?       @db.Uuid
-  receiptNumber      String
-  registerId         String?       @db.Uuid
-  shiftId            String?       @db.Uuid
-  warehouseId        String?       @db.Uuid
-  cashierId          String?       @db.Uuid
-  status             PosSaleStatus @default(COMPLETED)
-  idempotencyKey     String?
-  receiptToken       String        @unique @default(uuid()) @db.Uuid
-  discountApprovedBy String?       @db.Uuid
-  currency           String        @default("NGN") @db.Char(3)
-  subtotal           Decimal       @db.Decimal(19, 4)
-  discountTotal      Decimal       @default(0) @db.Decimal(19, 4)
-  taxTotal           Decimal       @default(0) @db.Decimal(19, 4)
-  total              Decimal       @db.Decimal(19, 4)
-  paidAmount         Decimal       @default(0) @db.Decimal(19, 4)
-  changeAmount       Decimal       @default(0) @db.Decimal(19, 4)
-  customerSignature  String?       @db.Text
-  salesManagerSignature String?    @db.Text
-  createdAt          DateTime      @default(now())
-  organization       Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  customer           Customer?     @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  items              PosSaleItem[]
-  payments           PosPayment[]
-  returns            PosReturn[]
-  register           PosRegister?  @relation(fields: [registerId], references: [id], onDelete: Restrict)
-  shift              PosShift?     @relation(fields: [shiftId], references: [id], onDelete: Restrict)
-  warehouse          Warehouse?    @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  id                    String        @id @default(uuid()) @db.Uuid
+  organizationId        String        @db.Uuid
+  branchId              String?       @db.Uuid
+  customerId            String?       @db.Uuid
+  receiptNumber         String
+  registerId            String?       @db.Uuid
+  shiftId               String?       @db.Uuid
+  warehouseId           String?       @db.Uuid
+  cashierId             String?       @db.Uuid
+  status                PosSaleStatus @default(COMPLETED)
+  idempotencyKey        String?
+  receiptToken          String        @unique @default(uuid()) @db.Uuid
+  discountApprovedBy    String?       @db.Uuid
+  currency              String        @default("NGN") @db.Char(3)
+  subtotal              Decimal       @db.Decimal(19, 4)
+  discountTotal         Decimal       @default(0) @db.Decimal(19, 4)
+  taxTotal              Decimal       @default(0) @db.Decimal(19, 4)
+  total                 Decimal       @db.Decimal(19, 4)
+  paidAmount            Decimal       @default(0) @db.Decimal(19, 4)
+  changeAmount          Decimal       @default(0) @db.Decimal(19, 4)
+  customerSignature     String?       @db.Text
+  salesManagerSignature String?       @db.Text
+  createdAt             DateTime      @default(now())
+  organization          Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  customer              Customer?     @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  items                 PosSaleItem[]
+  payments              PosPayment[]
+  returns               PosReturn[]
+  register              PosRegister?  @relation(fields: [registerId], references: [id], onDelete: Restrict)
+  shift                 PosShift?     @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+  warehouse             Warehouse?    @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
 
   @@unique([organizationId, receiptNumber])
   @@unique([organizationId, idempotencyKey])
@@ -518,28 +541,28 @@ model PosPayment {
 }
 
 model PosRegister {
-  id             String       @id @default(uuid()) @db.Uuid
-  organizationId String       @db.Uuid
-  warehouseId    String       @db.Uuid
-  assignedStaffId String?      @db.Uuid
-  branchId        String?      @db.Uuid
+  id                   String       @id @default(uuid()) @db.Uuid
+  organizationId       String       @db.Uuid
+  warehouseId          String       @db.Uuid
+  assignedStaffId      String?      @db.Uuid
+  branchId             String?      @db.Uuid
   defaultCashAccountId String?      @db.Uuid
   defaultCardAccountId String?      @db.Uuid
   defaultBankAccountId String?      @db.Uuid
   terminalId           String?
-  code           String
-  name           String
-  isActive       Boolean      @default(true)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  warehouse      Warehouse    @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
-  assignedStaff  User?        @relation("PosRegisterAssignedStaff", fields: [assignedStaffId], references: [id], onDelete: SetNull)
+  code                 String
+  name                 String
+  isActive             Boolean      @default(true)
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+  organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  warehouse            Warehouse    @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  assignedStaff        User?        @relation("PosRegisterAssignedStaff", fields: [assignedStaffId], references: [id], onDelete: SetNull)
   defaultCashAccount   BankAccount? @relation("PosRegisterDefaultCashAccount", fields: [defaultCashAccountId], references: [id], onDelete: SetNull)
   defaultCardAccount   BankAccount? @relation("PosRegisterDefaultCardAccount", fields: [defaultCardAccountId], references: [id], onDelete: SetNull)
   defaultBankAccount   BankAccount? @relation("PosRegisterDefaultBankAccount", fields: [defaultBankAccountId], references: [id], onDelete: SetNull)
-  shifts         PosShift[]
-  sales          PosSale[]
+  shifts               PosShift[]
+  sales                PosSale[]
 
   @@unique([organizationId, code])
   @@index([organizationId, warehouseId, isActive])
@@ -624,22 +647,23 @@ model ProductCategory {
 }
 
 model Warehouse {
-  id              String            @id @default(uuid()) @db.Uuid
-  organizationId  String            @db.Uuid
-  code            String
-  name            String
-  address         String?
-  manager         String?
-  isDefault       Boolean           @default(false)
-  isActive        Boolean           @default(true)
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
-  organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  movements       StockMovement[]
-  adjustments     StockAdjustment[]
-  posRegisters    PosRegister[]
-  posSales        PosSale[]
-  defaultProducts Product[]         @relation("ProductDefaultWarehouse")
+  id               String            @id @default(uuid()) @db.Uuid
+  organizationId   String            @db.Uuid
+  code             String
+  name             String
+  address          String?
+  manager          String?
+  isDefault        Boolean           @default(false)
+  isActive         Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  movements        StockMovement[]
+  adjustments      StockAdjustment[]
+  posRegisters     PosRegister[]
+  posSales         PosSale[]
+  defaultProducts  Product[]         @relation("ProductDefaultWarehouse")
+  commerceChannels CommerceChannel[]
 
   @@unique([organizationId, code])
   @@index([organizationId, isActive])
