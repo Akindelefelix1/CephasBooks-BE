@@ -18,6 +18,7 @@ import { InsightsModule } from './modules/insights/insights.module.ts';
 import { WorkflowModule } from './modules/workflow/workflow.module.ts';
 import { PosModule } from './modules/pos/pos.module.ts';
 import { CommerceModule } from './modules/commerce/commerce.module.ts';
+import { OfflineModule } from './modules/offline/offline.module.ts';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { CommerceModule } from './modules/commerce/commerce.module.ts';
     WorkflowModule,
     PosModule,
     CommerceModule,
+    OfflineModule,
   ],
 })
 export class AppModule {}
