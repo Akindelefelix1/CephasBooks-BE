@@ -191,6 +191,15 @@ export class OfflineService {
         const data = [...first.data, ...pages.flatMap((page) => page.data)];
         return { data, meta: { page: 1, limit: data.length, total: first.meta.total, totalPages: 1 } };
       }),
+      load('sales.view', '/pos/sales?includeVoided=true&limit=100&page=1', async () => {
+        const first = await pos.list(org, { page: 1, limit: 100, includeVoided: true }, user.sub, user.role, permissions);
+        if (first.meta.totalPages <= 1) return first;
+        const pages = await fetchPages(first.meta.totalPages, (page) =>
+          pos.list(org, { page, limit: 100, includeVoided: true }, user.sub, user.role, permissions),
+        );
+        const data = [...first.data, ...pages.flatMap((page) => page.data)];
+        return { data, meta: { page: 1, limit: data.length, total: first.meta.total, totalPages: 1 } };
+      }),
       load('sales.view', '/pos/registers', () => pos.registers(org, user.sub, user.role)),
       load('sales.view', '/pos/branches', () => pos.branches(org, user.sub, user.role)),
       load('sales.view', '/pos/shifts/current', () => pos.currentShift(org, user.sub)),
@@ -211,6 +220,13 @@ export class OfflineService {
         ? [load('sales.view', '/pos/audit', () => pos.posAudit(org))]
         : []),
     ]);
+
+    if (['OWNER', 'ADMIN'].includes(user.role)) {
+      const saleRows = resources['/pos/sales?limit=100&page=1'] as { data?: Array<{ id: string }> } | undefined;
+      await Promise.all((saleRows?.data ?? []).slice(0, 100).map((sale) =>
+        load('sales.view', `/pos/sales/${sale.id}/audit`, () => pos.saleAudit(org, sale.id)),
+      ));
+    }
 
     // Customer purchase history is a separately requested page in the sales UI.
     // Include it in the same consented snapshot so that page remains readable offline.
