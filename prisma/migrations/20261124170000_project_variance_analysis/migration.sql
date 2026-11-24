@@ -1,4 +1,4 @@
-﻿ALTER TABLE "Project" RENAME COLUMN "actualCost" TO "openingActualCost";
+ALTER TABLE "Project" RENAME COLUMN "actualCost" TO "openingActualCost";
 ALTER TABLE "Expense" ADD COLUMN "projectId" UUID;
 ALTER TABLE "Invoice" ADD COLUMN "projectId" UUID;
 ALTER TABLE "PaymentReceived" ADD COLUMN "projectId" UUID;

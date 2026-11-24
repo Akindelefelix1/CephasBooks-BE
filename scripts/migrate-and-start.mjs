@@ -10,10 +10,10 @@ const prismaExecutable = join(
   process.platform === 'win32' ? 'prisma.cmd' : 'prisma',
 );
 
-function run(command, args, captureOutput = false) {
+function run(command, args, captureOutput = false, env = process.env) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
-      env: process.env,
+      env,
       stdio: captureOutput ? ['inherit', 'pipe', 'pipe'] : 'inherit',
     });
     let output = '';
@@ -38,10 +38,24 @@ function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+function migrationDatabaseUrl() {
+  if (process.env.DIRECT_URL) return process.env.DIRECT_URL;
+  if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required to run migrations.');
+
+  const url = new URL(process.env.DATABASE_URL);
+  if (url.hostname.includes('-pooler')) {
+    url.hostname = url.hostname.replace(/-pooler(?=\.|$)/, '');
+    console.warn('DIRECT_URL is not set; using the unpooled Neon endpoint for migrations.');
+    return url.toString();
+  }
+  return process.env.DATABASE_URL;
+}
+
 async function deployMigrations() {
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     console.log(`Running database migrations (attempt ${attempt}/${maxAttempts})...`);
-    const result = await run(prismaExecutable, ['migrate', 'deploy'], true);
+    const migrationEnv = { ...process.env, DATABASE_URL: migrationDatabaseUrl() };
+    const result = await run(prismaExecutable, ['migrate', 'deploy'], true, migrationEnv);
     if (result.code === 0) return;
 
     const advisoryLockTimeout =
