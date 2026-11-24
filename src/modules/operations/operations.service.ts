@@ -54,6 +54,99 @@ export class OperationsService {
     };
   }
 
+  async branchInventory(org: string) {
+    const [products, branches] = await Promise.all([
+      this.db.product.findMany({
+        where: { organizationId: org, isActive: true, type: 'PRODUCT' },
+        orderBy: [{ name: 'asc' }],
+      }),
+      this.db.branch.findMany({
+        where: { organizationId: org, isActive: true, warehouse: { isActive: true } },
+        include: { warehouse: true },
+        orderBy: [{ name: 'asc' }],
+      }),
+    ]);
+    const productIds = products.map((product) => product.id);
+    const warehouseIds = branches.flatMap((branch) =>
+      branch.warehouse ? [branch.warehouse.id] : [],
+    );
+    const movements = productIds.length && warehouseIds.length
+      ? await this.db.stockMovement.groupBy({
+          by: ['productId', 'warehouseId', 'type'],
+          where: {
+            organizationId: org,
+            productId: { in: productIds },
+            warehouseId: { in: warehouseIds },
+          },
+          _sum: { quantity: true },
+        })
+      : [];
+    const balances = new Map<string, Prisma.Decimal>();
+    for (const row of movements) {
+      const key = `${row.productId}:${row.warehouseId}`;
+      const quantity = row._sum.quantity ?? new Prisma.Decimal(0);
+      const signed = ['ISSUE', 'TRANSFER_OUT'].includes(row.type)
+        ? quantity.neg()
+        : quantity;
+      balances.set(key, (balances.get(key) ?? new Prisma.Decimal(0)).add(signed));
+    }
+    const branchRows = branches.flatMap((branch) => {
+      const warehouse = branch.warehouse;
+      if (!warehouse) return [];
+      let inventoryValue = new Prisma.Decimal(0);
+      let lowStock = 0;
+      let outOfStock = 0;
+      const stock = products.map((product) => {
+        const quantity = balances.get(`${product.id}:${warehouse.id}`) ?? new Prisma.Decimal(0);
+        inventoryValue = inventoryValue.add(quantity.mul(product.costPrice));
+        if (quantity.lte(0)) outOfStock += 1;
+        else if (quantity.lte(product.reorderLevel)) lowStock += 1;
+        return {
+          productId: product.id,
+          sku: product.sku,
+          productName: product.name,
+          unit: product.unit,
+          reorderLevel: product.reorderLevel,
+          quantity,
+          status: quantity.lte(0) ? 'OUT_OF_STOCK' : quantity.lte(product.reorderLevel) ? 'LOW_STOCK' : 'IN_STOCK',
+        };
+      });
+      return [{
+        id: branch.id,
+        warehouseId: warehouse.id,
+        code: branch.code,
+        name: branch.name,
+        address: branch.address,
+        manager: branch.manager,
+        isActive: branch.isActive,
+        isDefault: warehouse.isDefault,
+        inventoryValue,
+        lowStock,
+        outOfStock,
+        products: stock,
+      }];
+    });
+    const consolidated = products.map((product) => {
+      const locations = branchRows.map((branch) => {
+        const stock = branch.products.find((row) => row.productId === product.id)!;
+        return { branchId: branch.id, branchName: branch.name, code: branch.code, quantity: stock.quantity, status: stock.status };
+      });
+      return {
+        productId: product.id,
+        sku: product.sku,
+        productName: product.name,
+        unit: product.unit,
+        reorderLevel: product.reorderLevel,
+        totalQuantity: locations.reduce((sum, location) => sum.add(location.quantity), new Prisma.Decimal(0)),
+        locations,
+      };
+    });
+    return {
+      branches: branchRows.map(({ products: _products, ...branch }) => branch),
+      products: consolidated,
+    };
+  }
+
   async products(org: string, q: Record<string, string>) {
     const products = await this.db.product.findMany({
       where: {
@@ -509,6 +602,7 @@ export class OperationsService {
           type: 'RECEIPT',
           quantity: d.quantity,
           unitCost: d.unitCost,
+          performedById: actor.sub,
           movementDate: this.dateOnly(d.movementDate),
           reference,
           notes: d.notes?.trim() || 'Product restock',
@@ -569,19 +663,55 @@ export class OperationsService {
       orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
     });
   }
+  branches(org: string) {
+    return this.db.branch.findMany({
+      where: { organizationId: org },
+      include: { warehouse: true },
+      orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+    });
+  }
+  async createBranch(org: string, d: WarehouseDto) {
+    const result = await this.createWarehouse(org, d);
+    return this.db.branch.findUniqueOrThrow({
+      where: { id: result.branch.id },
+      include: { warehouse: true },
+    });
+  }
+  async updateBranch(org: string, id: string, d: WarehouseDto) {
+    const branch = await this.db.branch.findFirst({ where: { id, organizationId: org }, include: { warehouse: true } });
+    if (!branch || !branch.warehouse) throw new NotFoundException('Branch not found');
+    return this.db.$transaction(async (tx) => {
+      const updated = await tx.branch.update({ where: { id }, data: d });
+      await tx.warehouse.update({ where: { id: branch.warehouse!.id }, data: d });
+      return { ...updated, warehouse: { ...branch.warehouse, ...d } };
+    });
+  }
+  async branchStatus(org: string, id: string, isActive: boolean) {
+    const branch = await this.db.branch.findFirst({ where: { id, organizationId: org }, include: { warehouse: true } });
+    if (!branch || !branch.warehouse) throw new NotFoundException('Branch not found');
+    await this.warehouseStatus(org, branch.warehouse.id, isActive);
+    return this.db.branch.update({ where: { id }, data: { isActive }, include: { warehouse: true } });
+  }
   async createWarehouse(org: string, d: WarehouseDto) {
     return this.db.$transaction(async (tx) => {
       const existingDefault = await tx.warehouse.count({
         where: { organizationId: org, isDefault: true },
       });
-      return tx.warehouse.create({
-        data: { ...d, organizationId: org, isDefault: existingDefault === 0 },
+      const branch = await tx.branch.create({ data: { ...d, organizationId: org } });
+      const warehouse = await tx.warehouse.create({
+        data: { ...d, organizationId: org, branchId: branch.id, isDefault: existingDefault === 0 },
       });
+      return { ...warehouse, branch };
     });
   }
   async updateWarehouse(org: string, id: string, d: WarehouseDto) {
-    await this.warehouse(org, id);
-    return this.db.warehouse.update({ where: { id }, data: d });
+    const warehouse = await this.warehouse(org, id);
+    return this.db.$transaction(async (tx) => {
+      const updated = await tx.warehouse.update({ where: { id }, data: d });
+      if (warehouse.branchId)
+        await tx.branch.update({ where: { id: warehouse.branchId }, data: d });
+      return updated;
+    });
   }
   async warehouseStatus(org: string, id: string, isActive: boolean) {
     const warehouse = await this.warehouse(org, id);
@@ -598,7 +728,12 @@ export class OperationsService {
       if (hasStock)
         throw new BadRequestException('A warehouse with stock on hand cannot be archived');
     }
-    return this.db.warehouse.update({ where: { id }, data: { isActive } });
+    return this.db.$transaction(async (tx) => {
+      const updated = await tx.warehouse.update({ where: { id }, data: { isActive } });
+      if (warehouse.branchId)
+        await tx.branch.update({ where: { id: warehouse.branchId }, data: { isActive } });
+      return updated;
+    });
   }
 
   async makeDefaultWarehouse(org: string, id: string) {
@@ -627,11 +762,15 @@ export class OperationsService {
             }
           : {}),
       },
-      include: { product: true, warehouse: true },
+      include: {
+        product: true,
+        warehouse: true,
+        performedBy: { select: { id: true, email: true, firstName: true, lastName: true } },
+      },
       orderBy: [{ movementDate: 'desc' }, { createdAt: 'desc' }],
     });
   }
-  async createMovement(org: string, d: MovementDto) {
+  async createMovement(org: string, d: MovementDto, performedById?: string) {
     const [product] = await Promise.all([
       this.product(org, d.productId, true),
       this.warehouse(org, d.warehouseId, true),
@@ -642,7 +781,12 @@ export class OperationsService {
       await this.requireStock(org, d.productId, d.warehouseId, d.quantity);
     return this.db.$transaction(async (tx) => {
       const movement = await tx.stockMovement.create({
-        data: { ...d, movementDate: this.dateOnly(d.movementDate), organizationId: org },
+        data: {
+          ...d,
+          movementDate: this.dateOnly(d.movementDate),
+          organizationId: org,
+          ...(performedById ? { performedById } : {}),
+        },
       });
       const value = new Prisma.Decimal(d.quantity).mul(d.unitCost);
       if (value.gt(0) && d.type === 'RECEIPT')
@@ -681,7 +825,7 @@ export class OperationsService {
       return movement;
     });
   }
-  async transfer(org: string, d: TransferDto) {
+  async transfer(org: string, d: TransferDto, performedById?: string) {
     if (d.fromWarehouseId === d.toWarehouseId)
       throw new BadRequestException('Transfer warehouses must be different');
     await Promise.all([
@@ -689,10 +833,16 @@ export class OperationsService {
       this.warehouse(org, d.fromWarehouseId, true),
       this.warehouse(org, d.toWarehouseId, true),
     ]);
-    await this.requireStock(org, d.productId, d.fromWarehouseId, d.quantity);
     const transferGroupId = randomUUID();
-    return this.db.$transaction([
-      this.db.stockMovement.create({
+    return this.db.$transaction(async (tx) => {
+      const rows = await tx.stockMovement.findMany({
+        where: { organizationId: org, productId: d.productId, warehouseId: d.fromWarehouseId },
+        select: { productId: true, type: true, quantity: true, unitCost: true },
+      });
+      const available = this.stockMap(rows).get(d.productId) ?? new Prisma.Decimal(0);
+      if (available.lt(d.quantity))
+        throw new BadRequestException(`Insufficient stock. Available quantity is ${available.toString()}`);
+      const outgoing = await tx.stockMovement.create({
         data: {
           organizationId: org,
           productId: d.productId,
@@ -703,10 +853,11 @@ export class OperationsService {
           movementDate: this.dateOnly(d.movementDate),
           reference: `${d.reference}-OUT`,
           transferGroupId,
+          ...(performedById ? { performedById } : {}),
           notes: d.notes,
         },
-      }),
-      this.db.stockMovement.create({
+      });
+      const incoming = await tx.stockMovement.create({
         data: {
           organizationId: org,
           productId: d.productId,
@@ -717,10 +868,12 @@ export class OperationsService {
           movementDate: this.dateOnly(d.movementDate),
           reference: `${d.reference}-IN`,
           transferGroupId,
+          ...(performedById ? { performedById } : {}),
           notes: d.notes,
         },
-      }),
-    ]);
+      });
+      return [outgoing, incoming];
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
   adjustments(org: string, q: Record<string, string>) {

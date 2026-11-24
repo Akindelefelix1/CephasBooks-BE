@@ -233,6 +233,7 @@ model User {
   bankTransactionReversals  BankTransaction[]     @relation("BankTransactionReversedBy")
   assignedPosRegisters      PosRegister[]         @relation("PosRegisterAssignedStaff")
   cashierPosShifts          PosShift[]            @relation("PosShiftCashier")
+  stockMovementsPerformed   StockMovement[]       @relation("StockMovementActor")
 }
 
 model Organization {
@@ -278,6 +279,7 @@ model Organization {
   products              Product[]
   productCategories     ProductCategory[]
   warehouses            Warehouse[]
+  branches              Branch[]
   stockMovements        StockMovement[]
   stockAdjustments      StockAdjustment[]
   projects              Project[]
@@ -646,9 +648,27 @@ model ProductCategory {
   @@index([organizationId, name])
 }
 
+model Branch {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  code           String
+  name           String
+  address        String?
+  manager        String?
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  warehouse      Warehouse?
+
+  @@unique([organizationId, code])
+  @@index([organizationId, isActive])
+}
+
 model Warehouse {
   id               String            @id @default(uuid()) @db.Uuid
   organizationId   String            @db.Uuid
+  branchId         String?           @unique @db.Uuid
   code             String
   name             String
   address          String?
@@ -658,6 +678,7 @@ model Warehouse {
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
   organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branch           Branch?           @relation(fields: [branchId], references: [id], onDelete: Restrict)
   movements        StockMovement[]
   adjustments      StockAdjustment[]
   posRegisters     PosRegister[]
@@ -680,16 +701,20 @@ model StockMovement {
   movementDate    DateTime          @db.Date
   reference       String
   transferGroupId String?           @db.Uuid
+  performedById   String?           @db.Uuid
   notes           String?
   createdAt       DateTime          @default(now())
   organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   product         Product           @relation(fields: [productId], references: [id], onDelete: Restrict)
   warehouse       Warehouse         @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  performedBy     User?             @relation("StockMovementActor", fields: [performedById], references: [id], onDelete: SetNull)
 
   @@unique([organizationId, reference])
   @@index([organizationId, movementDate])
   @@index([productId, warehouseId])
+  @@index([organizationId, warehouseId, productId])
   @@index([transferGroupId])
+  @@index([performedById])
 }
 
 model StockAdjustment {

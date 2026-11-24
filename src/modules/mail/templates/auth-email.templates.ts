@@ -17,7 +17,7 @@ export function verificationEmailTemplate(details: AuthEmailDetails & { code: st
       <div style="margin:28px 0;padding:24px;border:1px solid #dbe4ff;border-radius:16px;background:#f5f8ff;text-align:center">
         <div style="margin-bottom:10px;color:#66728a;font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase">Your verification code</div>
         <div style="color:#102a8f;font-size:34px;font-weight:800;letter-spacing:10px;line-height:1.2">${code}</div>
-        <div style="margin-top:12px;color:#66728a;font-size:13px">This code expires in 10 minutes.</div>
+        <div style="margin-top:12px;color:#66728a;font-size:13px">This code expires in 15 minutes.</div>
       </div>
       <p style="margin:0;color:#66728a;font-size:14px;line-height:1.65">For your security, never share this code with anyone. Cephas Books will never ask for it by phone or chat.</p>`,
   });

@@ -1,6 +1,7 @@
 ﻿import { Body, Controller, Get, HttpCode, HttpStatus, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
+import { RouteConfig } from '@nestjs/platform-fastify';
 import { CurrentUser, type AuthUser } from '../../common/decorators/current-user.decorator.ts';
 import { AuthService } from './auth.service.ts';
 import { LoginDto } from './dto/login.dto.ts';
@@ -14,20 +15,25 @@ import { ChangePasswordDto } from './dto/change-password.dto.ts';
 @Controller('auth')
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
+  @RouteConfig({ rateLimit: { max: 5, timeWindow: '1 minute', groupId: 'auth-register' } })
   @Post('register') register(@Body() dto: RegisterDto) {
     return this.auth.register(dto);
   }
+  @RouteConfig({ rateLimit: { max: 10, timeWindow: '1 minute', groupId: 'auth-verify-email' } })
   @HttpCode(HttpStatus.OK) @Post('verify-email') verifyEmail(@Body() dto: VerifyEmailDto) {
     return this.auth.verifyEmail(dto);
   }
+  @RouteConfig({ rateLimit: { max: 3, timeWindow: '1 minute', groupId: 'auth-resend-verification' } })
   @HttpCode(HttpStatus.OK) @Post('resend-verification') resendVerification(
     @Body() dto: ResendVerificationDto,
   ) {
     return this.auth.resendVerification(dto.email);
   }
+  @RouteConfig({ rateLimit: { max: 10, timeWindow: '1 minute', groupId: 'auth-login' } })
   @HttpCode(HttpStatus.OK) @Post('login') login(@Body() dto: LoginDto) {
     return this.auth.login(dto);
   }
+  @RouteConfig({ rateLimit: { max: 30, timeWindow: '1 minute', groupId: 'auth-refresh' } })
   @HttpCode(HttpStatus.OK) @Post('refresh') refresh(@Body() dto: RefreshDto) {
     return this.auth.refresh(dto.refreshToken);
   }

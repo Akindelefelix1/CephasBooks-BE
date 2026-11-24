@@ -18,6 +18,9 @@ import { VerifyEmailDto } from './dto/verify-email.dto.ts';
 import { UpdateProfileDto } from './dto/update-profile.dto.ts';
 import { ChangePasswordDto } from './dto/change-password.dto.ts';
 
+const VERIFICATION_CODE_TTL_SECONDS = 15 * 60;
+const VERIFICATION_CODE_TTL_MS = VERIFICATION_CODE_TTL_SECONDS * 1000;
+
 export interface Tokens {
   accessToken: string;
   refreshToken: string;
@@ -69,7 +72,7 @@ export class AuthService {
         result.organization.name,
         result.organization.name,
       );
-      return { email, verificationRequired: true, expiresIn: 600 };
+      return { email, verificationRequired: true, expiresIn: VERIFICATION_CODE_TTL_SECONDS };
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
         throw new ConflictException('Email is already registered');
@@ -217,7 +220,7 @@ export class AuthService {
       },
     });
     const message = 'If this email needs verification, a new code has been sent.';
-    if (!user || user.verifiedAt) return { message, expiresIn: 600 };
+    if (!user || user.verifiedAt) return { message, expiresIn: VERIFICATION_CODE_TTL_SECONDS };
     if (
       user.verificationCodeSentAt &&
       Date.now() - user.verificationCodeSentAt.getTime() < 60_000
@@ -233,7 +236,7 @@ export class AuthService {
       user.firstName ?? user.memberships[0]?.organization.name ?? 'there',
       user.memberships[0]?.organization.name ?? 'your organisation',
     );
-    return { message, expiresIn: 600 };
+    return { message, expiresIn: VERIFICATION_CODE_TTL_SECONDS };
   }
 
   async refresh(rawToken: string): Promise<Tokens> {
@@ -318,7 +321,7 @@ export class AuthService {
       where: { id: userId },
       data: {
         verificationCodeHash: this.hashToken(code),
-        verificationCodeExpiresAt: new Date(now.getTime() + 10 * 60_000),
+        verificationCodeExpiresAt: new Date(now.getTime() + VERIFICATION_CODE_TTL_MS),
       },
     });
     await this.mail.send({

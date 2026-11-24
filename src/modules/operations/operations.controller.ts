@@ -38,6 +38,9 @@ export class OperationsController {
   @Get('summary') summary(@CurrentUser() u: AuthUser) {
     return this.operations.summary(u.organizationId);
   }
+  @Get('branch-inventory') branchInventory(@CurrentUser() u: AuthUser) {
+    return this.operations.branchInventory(u.organizationId);
+  }
   @Get('products') products(@CurrentUser() u: AuthUser, @Query() q: Record<string, string>) {
     return this.operations.products(u.organizationId, q);
   }
@@ -98,6 +101,29 @@ export class OperationsController {
   @Get('warehouses') warehouses(@CurrentUser() u: AuthUser, @Query() q: Record<string, string>) {
     return this.operations.warehouses(u.organizationId, q);
   }
+  @Get('branches') branches(@CurrentUser() u: AuthUser) {
+    return this.operations.branches(u.organizationId);
+  }
+  @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT) @Post('branches') createBranch(
+    @CurrentUser() u: AuthUser,
+    @Body() d: WarehouseDto,
+  ) {
+    return this.operations.createBranch(u.organizationId, d);
+  }
+  @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT) @Patch('branches/:id') updateBranch(
+    @CurrentUser() u: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() d: WarehouseDto,
+  ) {
+    return this.operations.updateBranch(u.organizationId, id, d);
+  }
+  @Roles(Role.OWNER, Role.ADMIN) @Patch('branches/:id/status') branchStatus(
+    @CurrentUser() u: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() d: ActiveStatusDto,
+  ) {
+    return this.operations.branchStatus(u.organizationId, id, d.isActive);
+  }
   @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT) @Post('warehouses') createWarehouse(
     @CurrentUser() u: AuthUser,
     @Body() d: WarehouseDto,
@@ -131,13 +157,13 @@ export class OperationsController {
     @CurrentUser() u: AuthUser,
     @Body() d: MovementDto,
   ) {
-    return this.operations.createMovement(u.organizationId, d);
+    return this.operations.createMovement(u.organizationId, d, u.sub);
   }
   @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT) @Post('transfers') transfer(
     @CurrentUser() u: AuthUser,
     @Body() d: TransferDto,
   ) {
-    return this.operations.transfer(u.organizationId, d);
+    return this.operations.transfer(u.organizationId, d, u.sub);
   }
   @Get('adjustments') adjustments(@CurrentUser() u: AuthUser, @Query() q: Record<string, string>) {
     return this.operations.adjustments(u.organizationId, q);

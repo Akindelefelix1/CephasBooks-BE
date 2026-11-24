@@ -94,6 +94,29 @@ describe('AuthService', () => {
     );
   });
 
+  it('stores verification codes with a 15-minute expiry', async () => {
+    const update = jest.fn().mockResolvedValue({});
+    const mailSend = jest.fn().mockResolvedValue(undefined);
+    const service = new AuthService(
+      { user: { update } } as never,
+      {} as never,
+      { get: jest.fn().mockReturnValue('https://example.com') } as never,
+      { send: mailSend } as never,
+    );
+    const before = Date.now();
+    await (
+      service as unknown as {
+        createAndSendVerificationCode: (...args: string[]) => Promise<void>;
+      }
+    ).createAndSendVerificationCode('user-a', 'ada@example.com', 'Ada', 'Example');
+
+    const calls = update.mock.calls as unknown as Array<[{ data: { verificationCodeExpiresAt: Date } }]>;
+    const expiresAt = calls[0][0].data.verificationCodeExpiresAt.getTime();
+    expect(expiresAt).toBeGreaterThanOrEqual(before + 15 * 60_000);
+    expect(expiresAt).toBeLessThanOrEqual(Date.now() + 15 * 60_000);
+    expect(mailSend).toHaveBeenCalledTimes(1);
+  });
+
   it('throttles verification-code resends for one minute', async () => {
     const sendCode = jest.fn();
     const service = new AuthService(

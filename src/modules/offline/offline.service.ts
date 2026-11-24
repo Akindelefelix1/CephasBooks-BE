@@ -193,6 +193,7 @@ export class OfflineService {
       load('accounting.view', '/accounting/records/TAX?search=', () => accounting.records(org, 'TAX', {})),
       load('accounting.view', '/accounting/records/PAYROLL?search=', () => accounting.records(org, 'PAYROLL', {})),
       load('inventory.view', '/operations/summary', () => operations.summary(org)),
+      load('inventory.view', '/operations/branch-inventory', () => operations.branchInventory(org)),
       // The normal API intentionally exposes read-only catalogue and warehouse
       // data to POS users who only hold sales.view.
       loadAny(['inventory.view', 'sales.view'], '/operations/products?', () => operations.products(org, {})),

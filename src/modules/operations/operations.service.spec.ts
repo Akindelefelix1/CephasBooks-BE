@@ -4,6 +4,66 @@ import { jest } from '@jest/globals';
 import { OperationsService } from './operations.service.ts';
 
 describe('OperationsService', () => {
+  it('reports branch balances and consolidated totals from stock movements', async () => {
+    const service = new OperationsService({
+      product: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'product-a',
+            sku: 'A',
+            name: 'Product A',
+            type: 'PRODUCT',
+            unit: 'unit',
+            reorderLevel: new Prisma.Decimal(10),
+            costPrice: new Prisma.Decimal(4),
+          },
+          {
+            id: 'product-b',
+            sku: 'B',
+            name: 'Product B',
+            type: 'PRODUCT',
+            unit: 'unit',
+            reorderLevel: new Prisma.Decimal(5),
+            costPrice: new Prisma.Decimal(3),
+          },
+        ]),
+      },
+      branch: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'branch-a', code: 'LAG', name: 'Lagos', isActive: true,
+            address: null, manager: null,
+            warehouse: { id: 'warehouse-a', isDefault: true },
+          },
+          {
+            id: 'branch-b', code: 'IBA', name: 'Ibadan', isActive: true,
+            address: null, manager: null,
+            warehouse: { id: 'warehouse-b', isDefault: false },
+          },
+        ]),
+      },
+      stockMovement: {
+        groupBy: jest.fn().mockResolvedValue([
+          { productId: 'product-a', warehouseId: 'warehouse-a', type: 'RECEIPT', _sum: { quantity: new Prisma.Decimal(100) } },
+          { productId: 'product-a', warehouseId: 'warehouse-a', type: 'TRANSFER_OUT', _sum: { quantity: new Prisma.Decimal(20) } },
+          { productId: 'product-a', warehouseId: 'warehouse-b', type: 'RECEIPT', _sum: { quantity: new Prisma.Decimal(50) } },
+          { productId: 'product-a', warehouseId: 'warehouse-b', type: 'TRANSFER_IN', _sum: { quantity: new Prisma.Decimal(20) } },
+          { productId: 'product-b', warehouseId: 'warehouse-a', type: 'RECEIPT', _sum: { quantity: new Prisma.Decimal(2) } },
+        ]),
+      },
+    } as never);
+
+    const report = await service.branchInventory('org-a');
+
+    expect(report.products[0]?.locations.map((location) => location.quantity.toString())).toEqual([
+      '80', '70',
+    ]);
+    expect(report.products[0]?.totalQuantity.toString()).toBe('150');
+    expect(report.branches.map((branch) => [branch.lowStock, branch.outOfStock])).toEqual([
+      [1, 0], [0, 1],
+    ]);
+  });
+
   it('values product stock using sale price', async () => {
     const service = new OperationsService({
       product: {
