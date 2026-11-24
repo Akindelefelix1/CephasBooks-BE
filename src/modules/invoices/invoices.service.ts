@@ -76,6 +76,7 @@ export class InvoicesService {
           select: { baseCurrency: true },
         })
       ).baseCurrency;
+    const sendEmail = dto.sendEmail === true;
     const invoice = await this.prisma.$transaction(async (tx) => {
       const created = await tx.invoice.create({
       data: {
@@ -83,7 +84,7 @@ export class InvoicesService {
         branchId: dto.branchId ?? customer.branchId,
         customerId: dto.customerId,
         number,
-        status: dto.status,
+        status: sendEmail ? 'DRAFT' : (dto.status ?? 'DRAFT'),
         currency,
         issueDate: new Date(dto.issueDate),
         dueDate: new Date(dto.dueDate),
@@ -127,6 +128,19 @@ export class InvoicesService {
       title: `Approve invoice ${invoice.number}`,
       amount: Number(invoice.total),
     });
+    if (sendEmail) {
+      try {
+        await this.send(organizationId, invoice.id);
+        return { ...invoice, status: 'SENT', emailSent: true };
+      } catch (error) {
+        return {
+          ...invoice,
+          status: 'DRAFT',
+          emailSent: false,
+          emailError: error instanceof Error ? error.message : 'Email delivery failed.',
+        };
+      }
+    }
     return invoice;
   }
   async send(organizationId: string, id: string) {
@@ -135,6 +149,7 @@ export class InvoicesService {
       include: { customer: true, items: true, organization: true },
     });
     if (!invoice) throw new NotFoundException('Invoice not found');
+    if (invoice.status === 'VOID') throw new BadRequestException('A void invoice cannot be sent');
     if (!invoice.customer.email)
       throw new BadRequestException('This customer does not have an email address');
     const money = new Intl.NumberFormat('en-NG', { style: 'currency', currency: invoice.currency });
@@ -144,10 +159,38 @@ export class InvoicesService {
           `<tr><td>${escapeHtml(item.name)}</td><td>${escapeHtml(item.description)}</td><td align="center">${item.quantity.toString()}</td><td align="right">${money.format(Number(item.unitPrice))}</td><td align="right">${money.format(Number(item.lineTotal))}</td></tr>`,
       )
       .join('');
+    const statementInvoices = await this.prisma.invoice.findMany({
+      where: {
+        organizationId,
+        customerId: invoice.customerId,
+        OR: [{ status: { notIn: ['VOID', 'DRAFT'] } }, { id: invoice.id }],
+      },
+      orderBy: [{ issueDate: 'asc' }, { createdAt: 'asc' }],
+    });
+    const statementRows = statementInvoices.map((entry) => {
+      const balance = Prisma.Decimal.max(
+        new Prisma.Decimal(0),
+        entry.total.sub(entry.paidAmount).sub(entry.creditedAmount),
+      );
+      const statementStatus = entry.id === invoice.id && entry.status === 'DRAFT' ? 'SENT' : entry.status;
+      return `<tr><td>${escapeHtml(entry.number)}</td><td>${entry.issueDate.toLocaleDateString('en-NG')}</td><td>${entry.dueDate.toLocaleDateString('en-NG')}</td><td>${escapeHtml(statementStatus)}</td><td align="right">${money.format(Number(entry.total))}</td><td align="right">${money.format(Number(entry.paidAmount))}</td><td align="right">${money.format(Number(entry.creditedAmount))}</td><td align="right">${money.format(Number(balance))}</td></tr>`;
+    }).join('');
+    const outstanding = statementInvoices.reduce(
+      (sum, entry) => sum.add(Prisma.Decimal.max(new Prisma.Decimal(0), entry.total.sub(entry.paidAmount).sub(entry.creditedAmount))),
+      new Prisma.Decimal(0),
+    );
+    const statementPayments = await this.prisma.paymentReceived.findMany({
+      where: { organizationId, customerId: invoice.customerId },
+      include: { invoice: { select: { number: true } } },
+      orderBy: [{ paymentDate: 'asc' }, { createdAt: 'asc' }],
+    });
+    const paymentRows = statementPayments.map((payment) =>
+      `<tr><td>${payment.paymentDate.toLocaleDateString('en-NG')}</td><td>${escapeHtml(payment.reference)}</td><td>${escapeHtml(payment.invoice.number)}</td><td>${escapeHtml(payment.method)}</td><td align="right">${money.format(Number(payment.amount))}</td></tr>`,
+    ).join('');
     await this.mail?.send({
       to: invoice.customer.email,
-      subject: `Invoice ${invoice.number} from ${invoice.organization.name}`,
-      html: `<main style="max-width:680px;margin:auto;padding:32px;font-family:Arial,sans-serif;color:#20242c;border-top:8px solid #ff8500"><h1 style="margin:0">Invoice</h1><p>${escapeHtml(invoice.organization.name)}</p><p><strong>Invoice no.</strong> ${escapeHtml(invoice.number)}<br><strong>Due date:</strong> ${invoice.dueDate.toLocaleDateString('en-NG')}</p><p><strong>Bill to:</strong> ${escapeHtml(invoice.customer.displayName)}${invoice.shippingAddress ? `<br><strong>Ship to:</strong> ${escapeHtml(invoice.shippingAddress)}` : ''}</p><table width="100%" cellspacing="0" cellpadding="10" style="border-collapse:collapse;background:#fff"><thead style="background:#f3f4f6"><tr><th align="left">Product/service</th><th align="left">Description</th><th>Qty</th><th align="right">Unit price</th><th align="right">Amount</th></tr></thead><tbody>${rows}</tbody></table><p style="text-align:right">Shipping: ${money.format(Number(invoice.shippingAmount))}</p><p style="text-align:right;font-size:18px"><strong>Total: ${money.format(Number(invoice.total))}</strong></p><p>${escapeHtml(invoice.notes || 'Thank you for your business.')}</p></main>`,
+      subject: `Invoice ${invoice.number} and account statement from ${invoice.organization.name}`,
+      html: `<main style="max-width:900px;margin:auto;padding:32px;font-family:Arial,sans-serif;color:#20242c;border-top:8px solid #ff8500"><h1 style="margin:0">Invoice</h1><p>${escapeHtml(invoice.organization.name)}</p><p><strong>Invoice no.</strong> ${escapeHtml(invoice.number)}<br><strong>Due date:</strong> ${invoice.dueDate.toLocaleDateString('en-NG')}</p><p><strong>Bill to:</strong> ${escapeHtml(invoice.customer.displayName)}${invoice.shippingAddress ? `<br><strong>Ship to:</strong> ${escapeHtml(invoice.shippingAddress)}` : ''}</p><table width="100%" cellspacing="0" cellpadding="10" style="border-collapse:collapse;background:#fff"><thead style="background:#f3f4f6"><tr><th align="left">Product/service</th><th align="left">Description</th><th>Qty</th><th align="right">Unit price</th><th align="right">Amount</th></tr></thead><tbody>${rows}</tbody></table><p style="text-align:right">Shipping: ${money.format(Number(invoice.shippingAmount))}</p><p style="text-align:right;font-size:18px"><strong>Total: ${money.format(Number(invoice.total))}</strong></p><p>${escapeHtml(invoice.notes || 'Thank you for your business.')}</p><hr style="margin:32px 0;border:0;border-top:1px solid #ddd"><h2>Customer statement</h2><p>Account activity and outstanding balances for ${escapeHtml(invoice.customer.displayName)}.</p><div style="overflow-x:auto"><table width="100%" cellspacing="0" cellpadding="8" style="border-collapse:collapse"><thead style="background:#f3f4f6"><tr><th align="left">Invoice</th><th align="left">Date</th><th align="left">Due</th><th align="left">Status</th><th align="right">Total</th><th align="right">Paid</th><th align="right">Credits</th><th align="right">Balance</th></tr></thead><tbody>${statementRows}</tbody></table></div><p style="text-align:right;font-size:18px"><strong>Outstanding balance: ${money.format(Number(outstanding))}</strong></p><h3>Payments received</h3><div style="overflow-x:auto"><table width="100%" cellspacing="0" cellpadding="8" style="border-collapse:collapse"><thead style="background:#f3f4f6"><tr><th align="left">Date</th><th align="left">Reference</th><th align="left">Invoice number</th><th align="left">Method</th><th align="right">Amount</th></tr></thead><tbody>${paymentRows || '<tr><td colspan="5">No payments recorded.</td></tr>'}</tbody></table></div></main>`,
     });
     if (invoice.status === 'DRAFT')
       await this.prisma.$transaction(async (tx) => {

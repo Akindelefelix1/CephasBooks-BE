@@ -5,6 +5,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsDateString,
+  IsBoolean,
   IsEnum,
   IsISO4217CurrencyCode,
   IsNumber,
@@ -29,6 +30,8 @@ export class CreateInvoiceDto {
   @ApiProperty() @IsUUID() customerId!: string;
   @ApiPropertyOptional({ readOnly: true }) @IsOptional() @IsString() @MaxLength(50) number?: string;
   @ApiProperty({ enum: InvoiceStatus }) @IsOptional() @IsEnum(InvoiceStatus) status?: InvoiceStatus;
+  @ApiPropertyOptional({ description: 'Email the invoice and customer statement after saving.' })
+  @IsOptional() @IsBoolean() sendEmail?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsISO4217CurrencyCode() currency?: string;
   @ApiProperty() @IsDateString() issueDate!: string;
   @ApiProperty() @IsDateString() dueDate!: string;
