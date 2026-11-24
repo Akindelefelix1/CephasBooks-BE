@@ -1,11 +1,11 @@
-﻿import { Body, Controller, Get, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { Role } from '@prisma/client';
 import { CurrentUser, type AuthUser } from '../../common/decorators/current-user.decorator.ts';
 import { Roles } from '../../common/decorators/roles.decorator.ts';
 import { RolesGuard } from '../../common/guards/roles.guard.ts';
-import { CreateInvoiceDto } from './dto/create-invoice.dto.ts';
+import { CreateInvoiceDto, SendInvoiceDto } from './dto/create-invoice.dto.ts';
 import { InvoicesService } from './invoices.service.ts';
 
 @ApiTags('Invoices')
@@ -26,14 +26,14 @@ export class InvoicesController {
   @Get(':id') get(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.invoices.get(user.organizationId, id);
   }
-  @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT)
+  @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT, Role.APPROVER)
   @Post(':id/send')
-  send(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
-    return this.invoices.send(user.organizationId, id);
+  send(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: SendInvoiceDto = {}) {
+    return this.invoices.send(user.organizationId, id, { id: user.sub, role: user.role, permissions: user.permissions }, dto);
   }
   @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT)
   @Post()
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateInvoiceDto) {
-    return this.invoices.create(user.organizationId, dto);
+    return this.invoices.create(user.organizationId, { id: user.sub, role: user.role, permissions: user.permissions }, dto);
   }
 }

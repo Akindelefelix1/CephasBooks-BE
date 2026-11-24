@@ -105,7 +105,7 @@ export class PosController {
     return this.pos.closeShift(u.organizationId, u.sub, id, data);
   }
   @Post('sales') complete(@CurrentUser() u: AuthUser, @Body() data: CompletePosSaleDto) {
-    return this.pos.complete(u.organizationId, u.sub, data);
+    return this.pos.complete(u.organizationId, u.sub, data, { role: u.role, permissions: u.permissions });
   }
   @Patch('sales/:id/receipt-signatures') updateReceiptSignatures(
     @CurrentUser() u: AuthUser,

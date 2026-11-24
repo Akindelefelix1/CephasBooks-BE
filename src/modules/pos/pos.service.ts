@@ -8,6 +8,7 @@ import { Prisma } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../database/prisma.service.ts';
 import { assertBranch } from '../../common/branch-scope.ts';
+import { customerCreditExposure, lockCustomerCredit, requireCreditOverride } from '../customers/customer-credit.ts';
 import type { UpdatePosReceiptSignaturesDto } from './dto/pos.dto.ts';
 import { postAutomaticJournal } from '../../common/automatic-accounting.ts';
 import { MailService } from '../mail/mail.service.ts';
@@ -704,7 +705,10 @@ export class PosService {
         amount: number;
         reference?: string;
       }>;
+      creditLimitOverride?: boolean;
+      creditLimitOverrideReason?: string;
     },
+    approvalActor: { role: string; permissions?: string[] } = { role: 'MEMBER' },
   ) {
     if (!data.items?.length || !data.payments?.length)
       throw new BadRequestException('Items and payment are required');
@@ -808,22 +812,26 @@ export class PosService {
       const credit = data.payments
         .filter((p) => p.method === 'CREDIT')
         .reduce((sum, p) => sum.add(p.amount), new Prisma.Decimal(0));
+      let creditApproval: { customerId: string; limit: Prisma.Decimal; exposure: Prisma.Decimal; amount: Prisma.Decimal; reason: string } | null = null;
       if (credit.gt(0)) {
         if (!data.customerId)
           throw new BadRequestException('Credit sales require a selected customer');
+        await lockCustomerCredit(tx, org, data.customerId);
         const customer = await tx.customer.findFirst({
           where: { id: data.customerId, organizationId: org, isActive: true },
         });
         if (!customer) throw new BadRequestException('Selected customer is unavailable');
-        const exposure = await tx.posPayment.aggregate({
-          where: {
-            method: 'CREDIT',
-            sale: { organizationId: org, customerId: data.customerId, status: 'COMPLETED' },
-          },
-          _sum: { amount: true },
-        });
-        if (new Prisma.Decimal(exposure._sum.amount ?? 0).add(credit).gt(customer.creditLimit))
-          throw new BadRequestException('Customer credit limit would be exceeded');
+        const exposure = await customerCreditExposure(tx, org, data.customerId);
+        if (exposure.add(credit).gt(customer.creditLimit)) {
+          requireCreditOverride(approvalActor, data.creditLimitOverride, data.creditLimitOverrideReason);
+          creditApproval = {
+            customerId: customer.id,
+            limit: customer.creditLimit,
+            exposure,
+            amount: credit,
+            reason: data.creditLimitOverrideReason!.trim(),
+          };
+        }
       }
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`pos-receipt:${org}`}))`;
       const count = await tx.posSale.count({ where: { organizationId: org } });
@@ -889,6 +897,20 @@ export class PosService {
         },
         include: { items: true, payments: true, customer: true },
       });
+      if (creditApproval)
+        await tx.customerCreditOverrideApproval.create({
+          data: {
+            organizationId: org,
+            customerId: creditApproval.customerId,
+            approverId: cashierId,
+            targetType: 'POS_SALE',
+            targetId: sale.id,
+            creditLimit: creditApproval.limit,
+            existingExposure: creditApproval.exposure,
+            requestedAmount: creditApproval.amount,
+            reason: creditApproval.reason,
+          },
+        });
       await Promise.all(
         items
           .filter((x) => x.product.type === 'PRODUCT')
@@ -1174,20 +1196,25 @@ export class PosService {
   ) {
     return this.db.$transaction(async (tx) => {
       const accessibleBranches = role === 'OWNER' ? [] : await this.branches(org, actorId, role);
+      const saleWhere = {
+        id: saleId,
+        organizationId: org,
+        status: 'COMPLETED' as const,
+        ...(role === 'OWNER'
+          ? {}
+          : {
+              OR: [
+                { cashierId: actorId },
+                { branchId: { in: accessibleBranches.map((branch) => String(branch.id)) } },
+              ],
+            }),
+      };
+      const saleForCredit = await tx.posSale.findFirst({ where: saleWhere, select: { customerId: true } });
+      if (!saleForCredit) throw new NotFoundException('Completed sale not found');
+      if (saleForCredit.customerId) await lockCustomerCredit(tx, org, saleForCredit.customerId);
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`pos-return:${org}:${saleId}`}))`;
       const sale = await tx.posSale.findFirst({
-        where: {
-          id: saleId,
-          organizationId: org,
-          status: 'COMPLETED',
-          ...(role === 'OWNER'
-            ? {}
-            : {
-                OR: [
-                  { cashierId: actorId },
-                  { branchId: { in: accessibleBranches.map((branch) => String(branch.id)) } },
-                ],
-              }),
-        },
+        where: saleWhere,
         include: {
           items: {
             include: {
@@ -1203,6 +1230,7 @@ export class PosService {
             },
           },
           returns: true,
+          payments: true,
         },
       });
       if (!sale || !sale.warehouseId) throw new NotFoundException('Completed sale not found');
@@ -1215,6 +1243,18 @@ export class PosService {
       if (returned.add(data.quantity).gt(item.quantity))
         throw new BadRequestException('Return quantity exceeds the quantity sold');
       const amount = new Prisma.Decimal(item.lineTotal).div(item.quantity).mul(data.quantity);
+      const originalCredit = sale.payments
+        .filter((payment) => payment.method === 'CREDIT' && payment.status === 'APPROVED')
+        .reduce((sum, payment) => sum.add(payment.amount), new Prisma.Decimal(0));
+      const creditAlreadyReturned = sale.returns.reduce(
+        (sum, returnedItem) => sum.add(returnedItem.creditAmount),
+        new Prisma.Decimal(0),
+      );
+      const creditAmount = Prisma.Decimal.min(
+        amount,
+        Prisma.Decimal.max(new Prisma.Decimal(0), originalCredit.sub(creditAlreadyReturned)),
+      );
+      const cashRefund = amount.sub(creditAmount);
       const returnedBase = amount.div(new Prisma.Decimal(1).add(item.taxRate.div(100)));
       const returnedTax = amount.sub(returnedBase);
       const originalMovement = await tx.stockMovement.findFirst({
@@ -1234,6 +1274,7 @@ export class PosService {
           productId: data.productId,
           quantity: data.quantity,
           amount,
+          creditAmount,
           reason: data.reason,
           processedBy: actorId,
         },
@@ -1260,7 +1301,8 @@ export class PosService {
         lines: [
           { accountCode: '4000', debit: returnedBase, credit: 0, memo: 'Sales return' },
           { accountCode: '2100', debit: returnedTax, credit: 0, memo: 'Tax adjustment' },
-          { accountCode: '1000', debit: 0, credit: amount, memo: 'Customer refund' },
+          { accountCode: '1000', debit: 0, credit: cashRefund, memo: 'Cash refund' },
+          { accountCode: '1100', debit: 0, credit: creditAmount, memo: 'Reduce customer credit balance' },
           { accountCode: '1300', debit: costReturned, credit: 0, memo: 'Inventory returned' },
           {
             accountCode: '5300',

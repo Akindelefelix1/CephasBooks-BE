@@ -31,6 +31,8 @@ export class CreateInvoiceDto {
   @ApiPropertyOptional({ readOnly: true }) @IsOptional() @IsString() @MaxLength(50) number?: string;
   @ApiPropertyOptional({ description: 'Email the invoice and customer statement after saving.' })
   @IsOptional() @IsBoolean() sendEmail?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() creditLimitOverride?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(1000) creditLimitOverrideReason?: string;
   @ApiPropertyOptional() @IsOptional() @IsISO4217CurrencyCode() currency?: string;
   @ApiProperty() @IsDateString() issueDate!: string;
   @ApiProperty() @IsDateString() dueDate!: string;
@@ -48,4 +50,9 @@ export class CreateInvoiceDto {
   @ValidateNested({ each: true })
   @Type(() => InvoiceItemDto)
   items!: InvoiceItemDto[];
+}
+
+export class SendInvoiceDto {
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() creditLimitOverride?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(1000) creditLimitOverrideReason?: string;
 }

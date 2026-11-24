@@ -13,4 +13,6 @@ export class CreateCustomerDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(500) billingAddress?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(2000) notes?: string;
   @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsNumber() @Min(0) creditLimit?: number;
+  @ApiPropertyOptional({ description: 'Reason for the initial credit limit.' })
+  @IsOptional() @IsString() @MaxLength(1000) creditLimitReason?: string;
 }

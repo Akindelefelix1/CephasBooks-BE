@@ -210,89 +210,93 @@ enum WorkflowStatus {
 }
 
 model User {
-  id                         String                @id @default(uuid()) @db.Uuid
-  email                      String                @unique
+  id                         String                           @id @default(uuid()) @db.Uuid
+  email                      String                           @unique
   passwordHash               String
   firstName                  String?
   lastName                   String?
   phone                      String?
   address                    String?
-  mustChangePassword         Boolean               @default(false)
+  mustChangePassword         Boolean                          @default(false)
   passwordChangedAt          DateTime?
-  isActive                   Boolean               @default(true)
+  isActive                   Boolean                          @default(true)
   verifiedAt                 DateTime?
   verificationCodeHash       String?
   verificationCodeExpiresAt  DateTime?
   verificationCodeSentAt     DateTime?
-  createdAt                  DateTime              @default(now())
-  updatedAt                  DateTime              @updatedAt
+  createdAt                  DateTime                         @default(now())
+  updatedAt                  DateTime                         @updatedAt
   memberships                Membership[]
   sessions                   Session[]
   auditLogs                  AuditLog[]
   notificationReceipts       NotificationReceipt[]
-  bankTransactionReversals   BankTransaction[]     @relation("BankTransactionReversedBy")
-  assignedPosRegisters       PosRegister[]         @relation("PosRegisterAssignedStaff")
-  cashierPosShifts           PosShift[]            @relation("PosShiftCashier")
-  stockMovementsPerformed    StockMovement[]       @relation("StockMovementActor")
-  goodsReceivedNotesRecorded GoodsReceivedNote[]   @relation("GoodsReceivedNoteRecorder")
+  bankTransactionReversals   BankTransaction[]                @relation("BankTransactionReversedBy")
+  assignedPosRegisters       PosRegister[]                    @relation("PosRegisterAssignedStaff")
+  cashierPosShifts           PosShift[]                       @relation("PosShiftCashier")
+  stockMovementsPerformed    StockMovement[]                  @relation("StockMovementActor")
+  goodsReceivedNotesRecorded GoodsReceivedNote[]              @relation("GoodsReceivedNoteRecorder")
+  customerCreditAdjustments  CustomerCreditLimitAdjustment[]  @relation("CustomerCreditLimitAdjustmentActor")
+  customerCreditApprovals    CustomerCreditOverrideApproval[] @relation("CustomerCreditOverrideApprover")
 }
 
 model Organization {
-  id                    String               @id @default(uuid()) @db.Uuid
-  name                  String
-  slug                  String               @unique
-  baseCurrency          String               @default("NGN") @db.Char(3)
-  countryCode           String               @default("NG") @db.Char(2)
-  onboardingData        Json                 @default("{}")
-  onboardingStep        Int                  @default(0)
-  onboardingCompletedAt DateTime?
-  createdAt             DateTime             @default(now())
-  updatedAt             DateTime             @updatedAt
-  deletionCodeHash      String?
-  deletionCodeExpiresAt DateTime?
-  deletionCodeSentAt    DateTime?
-  deletionCodeAttempts  Int                  @default(0)
-  memberships           Membership[]
-  customRoles           CustomRole[]
-  customers             Customer[]
-  invoices              Invoice[]
-  posSales              PosSale[]
-  posRegisters          PosRegister[]
-  posShifts             PosShift[]
-  posAuditLogs          PosAuditLog[]
-  posReturns            PosReturn[]
-  posIdempotencyKeys    PosIdempotencyKey[]
-  auditLogs             AuditLog[]
-  bankAccounts          BankAccount[]
-  bankTransactions      BankTransaction[]
-  quotations            Quotation[]
-  payments              PaymentReceived[]
-  creditNotes           CreditNote[]
-  suppliers             Supplier[]
-  purchaseRequests      PurchaseRequest[]
-  purchaseOrders        PurchaseOrder[]
-  goodsReceivedNotes    GoodsReceivedNote[]
-  bills                 Bill[]
-  supplierPayments      SupplierPayment[]
-  expenses              Expense[]
-  ledgerAccounts        LedgerAccount[]
-  journals              Journal[]
-  financeRecords        FinanceRecord[]
-  products              Product[]
-  productCategories     ProductCategory[]
-  warehouses            Warehouse[]
-  branches              Branch[]
-  stockMovements        StockMovement[]
-  stockAdjustments      StockAdjustment[]
-  projects              Project[]
-  savedReports          SavedReport[]
-  aiInsights            AiInsight[]
-  workbookConnections   WorkbookConnection[]
-  documents             DocumentRecord[]
-  approvals             ApprovalRequest[]
-  notifications         AppNotification[]
-  workflowRules         WorkflowRule[]
-  commerceChannels      CommerceChannel[]
+  id                        String                           @id @default(uuid()) @db.Uuid
+  name                      String
+  slug                      String                           @unique
+  baseCurrency              String                           @default("NGN") @db.Char(3)
+  countryCode               String                           @default("NG") @db.Char(2)
+  onboardingData            Json                             @default("{}")
+  onboardingStep            Int                              @default(0)
+  onboardingCompletedAt     DateTime?
+  createdAt                 DateTime                         @default(now())
+  updatedAt                 DateTime                         @updatedAt
+  deletionCodeHash          String?
+  deletionCodeExpiresAt     DateTime?
+  deletionCodeSentAt        DateTime?
+  deletionCodeAttempts      Int                              @default(0)
+  memberships               Membership[]
+  customRoles               CustomRole[]
+  customers                 Customer[]
+  customerCreditAdjustments CustomerCreditLimitAdjustment[]
+  customerCreditApprovals   CustomerCreditOverrideApproval[]
+  invoices                  Invoice[]
+  posSales                  PosSale[]
+  posRegisters              PosRegister[]
+  posShifts                 PosShift[]
+  posAuditLogs              PosAuditLog[]
+  posReturns                PosReturn[]
+  posIdempotencyKeys        PosIdempotencyKey[]
+  auditLogs                 AuditLog[]
+  bankAccounts              BankAccount[]
+  bankTransactions          BankTransaction[]
+  quotations                Quotation[]
+  payments                  PaymentReceived[]
+  creditNotes               CreditNote[]
+  suppliers                 Supplier[]
+  purchaseRequests          PurchaseRequest[]
+  purchaseOrders            PurchaseOrder[]
+  goodsReceivedNotes        GoodsReceivedNote[]
+  bills                     Bill[]
+  supplierPayments          SupplierPayment[]
+  expenses                  Expense[]
+  ledgerAccounts            LedgerAccount[]
+  journals                  Journal[]
+  financeRecords            FinanceRecord[]
+  products                  Product[]
+  productCategories         ProductCategory[]
+  warehouses                Warehouse[]
+  branches                  Branch[]
+  stockMovements            StockMovement[]
+  stockAdjustments          StockAdjustment[]
+  projects                  Project[]
+  savedReports              SavedReport[]
+  aiInsights                AiInsight[]
+  workbookConnections       WorkbookConnection[]
+  documents                 DocumentRecord[]
+  approvals                 ApprovalRequest[]
+  notifications             AppNotification[]
+  workflowRules             WorkflowRule[]
+  commerceChannels          CommerceChannel[]
 }
 
 model CommerceChannel {
@@ -628,6 +632,7 @@ model PosReturn {
   productId      String       @db.Uuid
   quantity       Decimal      @db.Decimal(19, 4)
   amount         Decimal      @db.Decimal(19, 4)
+  creditAmount   Decimal      @default(0) @db.Decimal(19, 4)
   reason         String
   processedBy    String       @db.Uuid
   createdAt      DateTime     @default(now())
@@ -813,31 +818,69 @@ model Session {
 }
 
 model Customer {
-  id             String            @id @default(uuid()) @db.Uuid
-  organizationId String            @db.Uuid
-  branchId       String?           @db.Uuid
-  name           String?
-  displayName    String
-  companyName    String?
-  email          String?
-  phone          String?
-  taxId          String?
-  billingAddress String?
-  notes          String?
-  creditLimit    Decimal           @default(0) @db.Decimal(19, 4)
-  isActive       Boolean           @default(true)
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
-  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  invoices       Invoice[]
-  quotations     Quotation[]
-  payments       PaymentReceived[]
-  creditNotes    CreditNote[]
-  posSales       PosSale[]
+  id                      String                           @id @default(uuid()) @db.Uuid
+  organizationId          String                           @db.Uuid
+  branchId                String?                          @db.Uuid
+  name                    String?
+  displayName             String
+  companyName             String?
+  email                   String?
+  phone                   String?
+  taxId                   String?
+  billingAddress          String?
+  notes                   String?
+  creditLimit             Decimal                          @default(0) @db.Decimal(19, 4)
+  isActive                Boolean                          @default(true)
+  createdAt               DateTime                         @default(now())
+  updatedAt               DateTime                         @updatedAt
+  organization            Organization                     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  invoices                Invoice[]
+  quotations              Quotation[]
+  payments                PaymentReceived[]
+  creditNotes             CreditNote[]
+  posSales                PosSale[]
+  creditLimitAdjustments  CustomerCreditLimitAdjustment[]
+  creditOverrideApprovals CustomerCreditOverrideApproval[]
 
   @@unique([organizationId, email])
   @@index([organizationId, displayName])
   @@index([organizationId, branchId])
+}
+
+model CustomerCreditLimitAdjustment {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  customerId     String       @db.Uuid
+  actorId        String?      @db.Uuid
+  previousLimit  Decimal      @db.Decimal(19, 4)
+  newLimit       Decimal      @db.Decimal(19, 4)
+  reason         String       @db.VarChar(1000)
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customer       Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  actor          User?        @relation("CustomerCreditLimitAdjustmentActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, customerId, createdAt])
+}
+
+model CustomerCreditOverrideApproval {
+  id               String       @id @default(uuid()) @db.Uuid
+  organizationId   String       @db.Uuid
+  customerId       String       @db.Uuid
+  approverId       String?      @db.Uuid
+  targetType       String       @db.VarChar(24)
+  targetId         String       @db.VarChar(64)
+  creditLimit      Decimal      @db.Decimal(19, 4)
+  existingExposure Decimal      @db.Decimal(19, 4)
+  requestedAmount  Decimal      @db.Decimal(19, 4)
+  reason           String       @db.VarChar(1000)
+  createdAt        DateTime     @default(now())
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customer         Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  approver         User?        @relation("CustomerCreditOverrideApprover", fields: [approverId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, targetType, targetId])
+  @@index([organizationId, customerId, createdAt])
 }
 
 model Invoice {

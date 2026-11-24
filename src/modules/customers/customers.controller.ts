@@ -1,4 +1,4 @@
-﻿import {
+import {
   Body,
   Controller,
   Delete,
@@ -41,10 +41,28 @@ export class CustomersController {
   }
   @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT)
   @Post() create(@CurrentUser() u: AuthUser, @Body() dto: CreateCustomerDto) {
-    return this.customers.create(u.organizationId, dto);
+    return this.customers.create(u.organizationId, u.sub, dto);
   }
   @Get(':id') get(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.customers.get(u.organizationId, id);
+  }
+  @Get(':id/credit-status') creditStatus(
+    @CurrentUser() u: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.customers.creditStatus(u.organizationId, id);
+  }
+  @Get(':id/credit-limit-history') creditLimitHistory(
+    @CurrentUser() u: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.customers.creditLimitHistory(u.organizationId, id);
+  }
+  @Get(':id/credit-override-history') creditOverrideHistory(
+    @CurrentUser() u: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.customers.creditOverrideHistory(u.organizationId, id);
   }
   @Get(':id/purchase-history') purchaseHistory(
     @CurrentUser() u: AuthUser,
@@ -58,7 +76,7 @@ export class CustomersController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateCustomerDto,
   ) {
-    return this.customers.update(u.organizationId, id, dto);
+    return this.customers.update(u.organizationId, id, u.sub, dto);
   }
   @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT)
   @Delete(':id') archive(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string) {

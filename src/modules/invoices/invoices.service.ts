@@ -1,4 +1,4 @@
-﻿import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, HttpException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.ts';
 import { CreateInvoiceDto } from './dto/create-invoice.dto.ts';
@@ -6,6 +6,7 @@ import { WorkflowService } from '../workflow/workflow.service.ts';
 import { MailService } from '../mail/mail.service.ts';
 import { assertBranch } from '../../common/branch-scope.ts';
 import { postAutomaticJournal } from '../../common/automatic-accounting.ts';
+import { customerCreditExposure, lockCustomerCredit, requireCreditOverride } from '../customers/customer-credit.ts';
 
 @Injectable()
 export class InvoicesService {
@@ -58,7 +59,7 @@ export class InvoicesService {
     if (!invoice) throw new NotFoundException('Invoice not found');
     return invoice;
   }
-  async create(organizationId: string, dto: CreateInvoiceDto) {
+  async create(organizationId: string, actor: { id: string; role: string; permissions?: string[] }, dto: CreateInvoiceDto) {
     await assertBranch(this.prisma, organizationId, dto.branchId);
     const customer = await this.prisma.customer.findFirst({
       where: { id: dto.customerId, organizationId, isActive: true },
@@ -142,12 +143,13 @@ export class InvoicesService {
     });
     if (sendEmail) {
       try {
-        await this.send(organizationId, invoice.id);
+        await this.send(organizationId, invoice.id, actor, dto);
         return { ...invoice, status: 'SENT', emailSent: true };
       } catch (error) {
+        if (error instanceof HttpException) throw error;
         return {
           ...invoice,
-          status: 'DRAFT',
+          status: 'SENT',
           emailSent: false,
           emailError: error instanceof Error ? error.message : 'Email delivery failed.',
         };
@@ -155,8 +157,8 @@ export class InvoicesService {
     }
     return invoice;
   }
-  async send(organizationId: string, id: string) {
-    const invoice = await this.prisma.invoice.findFirst({
+  async send(organizationId: string, id: string, actor: { id: string; role: string; permissions?: string[] }, approval: { creditLimitOverride?: boolean; creditLimitOverrideReason?: string } = {}) {
+    let invoice = await this.prisma.invoice.findFirst({
       where: { id, organizationId },
       include: { customer: true, items: true, organization: true },
     });
@@ -164,6 +166,53 @@ export class InvoicesService {
     if (invoice.status === 'VOID') throw new BadRequestException('A void invoice cannot be sent');
     if (!invoice.customer.email)
       throw new BadRequestException('This customer does not have an email address');
+    if (invoice.status === 'DRAFT') {
+      invoice = await this.prisma.$transaction(async (tx) => {
+        await lockCustomerCredit(tx, organizationId, invoice!.customerId);
+        const current = await tx.invoice.findFirst({
+          where: { id, organizationId },
+          include: { customer: true, items: true, organization: true },
+        });
+        if (!current) throw new NotFoundException('Invoice not found');
+        if (current.status !== 'DRAFT') return current;
+        const baseCurrency = (await tx.organization.findUniqueOrThrow({
+          where: { id: organizationId }, select: { baseCurrency: true },
+        })).baseCurrency;
+        if (current.currency !== baseCurrency)
+          throw new BadRequestException(`Credit sales must use the organization base currency (${baseCurrency}) so customer limits can be checked accurately.`);
+        const exposure = await customerCreditExposure(tx, organizationId, current.customerId);
+        const invoiceBalance = Prisma.Decimal.max(new Prisma.Decimal(0), current.total.sub(current.paidAmount).sub(current.creditedAmount));
+        if (exposure.add(invoiceBalance).gt(current.customer.creditLimit)) {
+          requireCreditOverride(actor, approval.creditLimitOverride, approval.creditLimitOverrideReason);
+          await tx.customerCreditOverrideApproval.create({
+            data: {
+              organizationId,
+              customerId: current.customerId,
+              approverId: actor.id,
+              targetType: 'INVOICE',
+              targetId: current.id,
+              creditLimit: current.customer.creditLimit,
+              existingExposure: exposure,
+              requestedAmount: invoiceBalance,
+              reason: approval.creditLimitOverrideReason!.trim(),
+            },
+          });
+        }
+        const sent = await tx.invoice.update({ where: { id }, data: { status: 'SENT' } });
+        await postAutomaticJournal(tx, {
+          organizationId,
+          number: `AUTO-INVOICE-${sent.id}`,
+          journalDate: sent.issueDate,
+          description: `Invoice ${sent.number}`,
+          lines: [
+            { accountCode: '1100', debit: sent.total, credit: 0, memo: 'Accounts receivable' },
+            { accountCode: '4000', debit: 0, credit: sent.total.sub(sent.taxTotal), memo: 'Sales revenue' },
+            { accountCode: '2100', debit: 0, credit: sent.taxTotal, memo: 'Tax payable' },
+          ],
+        });
+        return { ...current, ...sent, status: 'SENT' as const };
+      });
+    }
     const money = new Intl.NumberFormat('en-NG', { style: 'currency', currency: invoice.currency });
     const rows = invoice.items
       .map(
@@ -200,30 +249,11 @@ export class InvoicesService {
       `<tr><td>${payment.paymentDate.toLocaleDateString('en-NG')}</td><td>${escapeHtml(payment.reference)}</td><td>${escapeHtml(payment.invoice.number)}</td><td>${escapeHtml(payment.method)}</td><td align="right">${money.format(Number(payment.amount))}</td></tr>`,
     ).join('');
     await this.mail?.send({
-      to: invoice.customer.email,
+      to: invoice.customer.email!,
       subject: `Invoice ${invoice.number} and account statement from ${invoice.organization.name}`,
       html: `<main style="max-width:900px;margin:auto;padding:32px;font-family:Arial,sans-serif;color:#20242c;border-top:8px solid #ff8500"><h1 style="margin:0">Invoice</h1><p>${escapeHtml(invoice.organization.name)}</p><p><strong>Invoice no.</strong> ${escapeHtml(invoice.number)}<br><strong>Due date:</strong> ${invoice.dueDate.toLocaleDateString('en-NG')}</p><p><strong>Bill to:</strong> ${escapeHtml(invoice.customer.displayName)}${invoice.shippingAddress ? `<br><strong>Ship to:</strong> ${escapeHtml(invoice.shippingAddress)}` : ''}</p><table width="100%" cellspacing="0" cellpadding="10" style="border-collapse:collapse;background:#fff"><thead style="background:#f3f4f6"><tr><th align="left">Product/service</th><th align="left">Description</th><th>Qty</th><th align="right">Unit price</th><th align="right">Amount</th></tr></thead><tbody>${rows}</tbody></table><p style="text-align:right">Shipping: ${money.format(Number(invoice.shippingAmount))}</p><p style="text-align:right;font-size:18px"><strong>Total: ${money.format(Number(invoice.total))}</strong></p><p>${escapeHtml(invoice.notes || 'Thank you for your business.')}</p><hr style="margin:32px 0;border:0;border-top:1px solid #ddd"><h2>Customer statement</h2><p>Account activity and outstanding balances for ${escapeHtml(invoice.customer.displayName)}.</p><div style="overflow-x:auto"><table width="100%" cellspacing="0" cellpadding="8" style="border-collapse:collapse"><thead style="background:#f3f4f6"><tr><th align="left">Invoice</th><th align="left">Date</th><th align="left">Due</th><th align="left">Status</th><th align="right">Total</th><th align="right">Paid</th><th align="right">Credits</th><th align="right">Balance</th></tr></thead><tbody>${statementRows}</tbody></table></div><p style="text-align:right;font-size:18px"><strong>Outstanding balance: ${money.format(Number(outstanding))}</strong></p><h3>Payments received</h3><div style="overflow-x:auto"><table width="100%" cellspacing="0" cellpadding="8" style="border-collapse:collapse"><thead style="background:#f3f4f6"><tr><th align="left">Date</th><th align="left">Reference</th><th align="left">Invoice number</th><th align="left">Method</th><th align="right">Amount</th></tr></thead><tbody>${paymentRows || '<tr><td colspan="5">No payments recorded.</td></tr>'}</tbody></table></div></main>`,
     });
-    if (invoice.status === 'DRAFT')
-      await this.prisma.$transaction(async (tx) => {
-        const sent = await tx.invoice.update({ where: { id }, data: { status: 'SENT' } });
-        await postAutomaticJournal(tx, {
-          organizationId,
-          number: `AUTO-INVOICE-${sent.id}`,
-          journalDate: sent.issueDate,
-          description: `Invoice ${sent.number}`,
-          lines: [
-            { accountCode: '1100', debit: sent.total, credit: 0, memo: 'Accounts receivable' },
-            {
-              accountCode: '4000',
-              debit: 0,
-              credit: sent.total.sub(sent.taxTotal),
-              memo: 'Sales revenue',
-            },
-            { accountCode: '2100', debit: 0, credit: sent.taxTotal, memo: 'Tax payable' },
-          ],
-        });
-      });
+
     return { sent: true };
   }
 }

@@ -43,6 +43,8 @@ export class CompletePosSaleDto {
   @Type(() => PosPaymentDto)
   payments!: PosPaymentDto[];
   @IsOptional() @IsString() @MaxLength(128) idempotencyKey?: string;
+  @IsOptional() @IsBoolean() creditLimitOverride?: boolean;
+  @IsOptional() @IsString() @MaxLength(1000) creditLimitOverrideReason?: string;
 }
 export class UpdatePosReceiptSignaturesDto {
   @IsOptional()
