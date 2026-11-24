@@ -24,13 +24,26 @@ async function bootstrap(): Promise<void> {
   app.enableShutdownHooks();
   app.setGlobalPrefix(config.getOrThrow<string>('API_PREFIX'));
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
+  const configuredCorsOrigins = config
+    .getOrThrow<string>('CORS_ORIGINS')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  const frontendUrl = config.get<string>('FRONTEND_URL');
+  const allowedCorsOrigins = [...new Set(
+    [
+      'https://cephas-books.onrender.com',
+      ...configuredCorsOrigins,
+      ...(frontendUrl ? [frontendUrl] : []),
+    ]
+      .map((origin) => new URL(origin).origin),
+  )];
   app.enableCors({
-    origin: config
-      .getOrThrow<string>('CORS_ORIGINS')
-      .split(',')
-      .map((origin) => origin.trim().replace(/\/+$/, '')),
+    origin: allowedCorsOrigins,
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    maxAge: 600,
   });
   app.useGlobalPipes(
     new ValidationPipe({

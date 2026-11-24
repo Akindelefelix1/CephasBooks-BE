@@ -9,7 +9,9 @@ const schema = z.object({
   JWT_REFRESH_SECRET: z.string().min(32),
   JWT_ACCESS_TTL: z.string().default('15m'),
   JWT_REFRESH_TTL: z.string().default('7d'),
-  CORS_ORIGINS: z.string().default('http://localhost:5173'),
+  CORS_ORIGINS: z
+    .string()
+    .default('http://localhost:5173,https://cephas-books.onrender.com'),
   SWAGGER_ENABLED: z.enum(['true', 'false']).default('true'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   ZOHO_MAIL_API_TOKEN: z.preprocess(
