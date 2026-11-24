@@ -21,6 +21,7 @@ export class InvoicesService {
         customer: true,
         project: { select: { id: true, code: true, name: true } },
         items: true,
+        payments: { orderBy: { paymentDate: 'desc' } },
         organization: { select: { name: true, countryCode: true } },
       },
       orderBy: { createdAt: 'desc' },

@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { jest } from '@jest/globals';
 import { SalesService } from './sales.service.ts';
@@ -123,5 +123,39 @@ describe('SalesService', () => {
         method: 'Bank transfer',
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects a payment when the invoice balance changed after it was selected', async () => {
+    const updateMany = jest.fn().mockResolvedValue({ count: 0 });
+    const tx = {
+      invoice: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'invoice',
+          number: 'INV-00001',
+          issueDate: new Date('2026-09-15'),
+          total: new Prisma.Decimal(100),
+          paidAmount: new Prisma.Decimal(0),
+          creditedAmount: new Prisma.Decimal(0),
+          taxTotal: new Prisma.Decimal(0),
+        }),
+        updateMany,
+      },
+    };
+    const service = new SalesService({
+      $transaction: jest
+        .fn()
+        .mockImplementation((operation: (client: typeof tx) => unknown) => operation(tx)),
+    } as never);
+
+    await expect(
+      service.recordPayment('org-a', {
+        invoiceId: 'invoice',
+        reference: 'PAY-2',
+        amount: 50,
+        paymentDate: '2026-09-15',
+        method: 'Bank transfer',
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(updateMany).toHaveBeenCalledTimes(1);
   });
 });

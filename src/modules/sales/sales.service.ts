@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma, SalesDocumentStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.ts';
 import { MailService } from '../mail/mail.service.ts';
@@ -276,6 +281,7 @@ export class SalesService {
               OR: [
                 { reference: { contains: q.search, mode: 'insensitive' } },
                 { customer: { displayName: { contains: q.search, mode: 'insensitive' } } },
+                { invoice: { number: { contains: q.search, mode: 'insensitive' } } },
               ],
             }
           : {}),
@@ -291,13 +297,29 @@ export class SalesService {
     await assertBranch(this.prisma, org, d.branchId);
     return this.prisma.$transaction(async (tx) => {
       const inv = await tx.invoice.findFirst({
-        where: { id: d.invoiceId, organizationId: org, status: { not: 'VOID' } },
+        where: { id: d.invoiceId, organizationId: org, status: { notIn: ['VOID', 'DRAFT'] } },
       });
       if (!inv) throw new NotFoundException('Invoice not found');
       const outstanding = inv.total.sub(inv.paidAmount).sub(inv.creditedAmount),
         amount = new Prisma.Decimal(d.amount);
       if (amount.gt(outstanding)) throw new BadRequestException('Payment exceeds invoice balance');
       const paid = inv.paidAmount.add(amount);
+      const balanceUpdate = await tx.invoice.updateMany({
+        where: {
+          id: inv.id,
+          organizationId: org,
+          paidAmount: inv.paidAmount,
+          creditedAmount: inv.creditedAmount,
+          total: inv.total,
+          status: { notIn: ['VOID', 'DRAFT'] },
+        },
+        data: {
+          paidAmount: { increment: amount },
+          status: paid.add(inv.creditedAmount).gte(inv.total) ? 'PAID' : 'PARTIALLY_PAID',
+        },
+      });
+      if (balanceUpdate.count !== 1)
+        throw new ConflictException('Invoice balance changed. Refresh the invoice and try again.');
       await postAutomaticJournal(tx, {
         organizationId: org,
         number: `AUTO-INVOICE-${inv.id}`,
@@ -324,13 +346,6 @@ export class SalesService {
           currency: inv.currency,
           paymentDate: new Date(d.paymentDate),
           amount,
-        },
-      });
-      await tx.invoice.update({
-        where: { id: inv.id },
-        data: {
-          paidAmount: paid,
-          status: paid.add(inv.creditedAmount).gte(inv.total) ? 'PAID' : 'PARTIALLY_PAID',
         },
       });
       await postAutomaticJournal(tx, {
