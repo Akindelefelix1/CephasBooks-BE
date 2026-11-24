@@ -1,12 +1,16 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, SalesDocumentStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.ts';
+import { MailService } from '../mail/mail.service.ts';
 import { CreditNoteDto, CreateQuotationDto, PaymentDto } from './dto/sales.dto.ts';
 import { assertBranch } from '../../common/branch-scope.ts';
 import { postAutomaticJournal, reverseAutomaticJournal } from '../../common/automatic-accounting.ts';
 @Injectable()
 export class SalesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mail?: MailService,
+  ) {}
   private totals(items: Array<{ quantity: number; unitPrice: number; taxRate?: number }>) {
     const subtotal = items.reduce(
       (s, x) => s.add(new Prisma.Decimal(x.quantity).mul(x.unitPrice)),
@@ -109,12 +113,13 @@ export class SalesService {
           select: { baseCurrency: true },
         })
       ).baseCurrency;
-    const { number: _number, ...quotationData } = d;
+    const { number: _number, sendEmail, ...quotationData } = d;
     void _number;
     const number = (await this.nextQuotationNumber(org)).number;
-    return this.prisma.quotation.create({
+    const quotation = await this.prisma.quotation.create({
       data: {
         ...quotationData,
+        status: sendEmail ? 'DRAFT' : quotationData.status,
         number,
         currency,
         organizationId: org,
@@ -125,14 +130,26 @@ export class SalesService {
       },
       include: { customer: true },
     });
+    if (!sendEmail) return quotation;
+    try {
+      await this.sendQuotation(org, quotation.id);
+      return { ...quotation, status: 'SENT', emailSent: true as const };
+    } catch (error) {
+      return {
+        ...quotation,
+        emailSent: false as const,
+        emailError: error instanceof Error ? error.message : 'Email delivery failed',
+      };
+    }
   }
   async updateQuotation(org: string, id: string, d: CreateQuotationDto) {
     const row = await this.prisma.quotation.findFirst({ where: { id, organizationId: org } });
     if (!row) throw new NotFoundException('Quotation not found');
     if (row.status === 'CONVERTED')
       throw new BadRequestException('Converted quotation cannot be edited');
-    const { number: _number, ...quotationData } = d;
+    const { number: _number, sendEmail: _sendEmail, ...quotationData } = d;
     void _number;
+    void _sendEmail;
     return this.prisma.quotation.update({
       where: { id },
       data: {
@@ -156,6 +173,43 @@ export class SalesService {
       where: { id },
       data: { status: status as SalesDocumentStatus },
     });
+  }
+  async sendQuotation(org: string, id: string) {
+    const quotation = await this.prisma.quotation.findFirst({
+      where: { id, organizationId: org },
+      include: { customer: true, organization: true },
+    });
+    if (!quotation) throw new NotFoundException('Quotation not found');
+    if (!quotation.customer.email)
+      throw new BadRequestException('This customer does not have an email address');
+    if (['CONVERTED', 'VOID', 'DECLINED', 'EXPIRED'].includes(quotation.status))
+      throw new BadRequestException('This quotation cannot be sent');
+    const items = quotation.items as Array<{
+      name: string;
+      description: string;
+      quantity: number;
+      unitPrice: number;
+      taxRate?: number;
+    }>;
+    const money = new Intl.NumberFormat('en-NG', {
+      style: 'currency',
+      currency: quotation.currency,
+    });
+    const rows = items
+      .map((item) => {
+        const amount = Number(item.quantity) * Number(item.unitPrice);
+        const total = amount + amount * ((item.taxRate ?? 0) / 100);
+        return `<tr><td>${escapeHtml(item.name)}</td><td>${escapeHtml(item.description)}</td><td align="center">${Number(item.quantity)}</td><td align="right">${money.format(Number(item.unitPrice))}</td><td align="right">${money.format(total)}</td></tr>`;
+      })
+      .join('');
+    await this.mail?.send({
+      to: quotation.customer.email,
+      subject: `Quotation ${quotation.number} from ${quotation.organization.name}`,
+      html: `<main style="max-width:680px;margin:auto;padding:32px;font-family:Arial,sans-serif;color:#20242c;border-top:8px solid #ff8500"><h1>Quotation</h1><p>${escapeHtml(quotation.organization.name)}</p><p><strong>Quotation no.</strong> ${escapeHtml(quotation.number)}<br><strong>Date:</strong> ${quotation.issueDate.toLocaleDateString('en-NG')}<br><strong>Valid until:</strong> ${quotation.expiryDate.toLocaleDateString('en-NG')}</p><p><strong>Prepared for:</strong> ${escapeHtml(quotation.customer.displayName)}</p><table width="100%" cellspacing="0" cellpadding="10" style="border-collapse:collapse"><thead><tr><th align="left">Item</th><th align="left">Details</th><th>Qty</th><th align="right">Rate</th><th align="right">Amount</th></tr></thead><tbody>${rows}</tbody></table><p style="text-align:right;font-size:18px"><strong>Total: ${money.format(Number(quotation.total))}</strong></p>${quotation.notes ? `<section><strong>Terms &amp; Conditions</strong><p>${escapeHtml(quotation.notes).replace(/\n/g, '<br>')}</p></section>` : ''}</main>`,
+    });
+    if (quotation.status === 'DRAFT')
+      await this.prisma.quotation.update({ where: { id }, data: { status: 'SENT' } });
+    return { sent: true as const };
   }
   async convertQuotation(org: string, id: string) {
     const quote = await this.prisma.quotation.findFirst({
@@ -425,4 +479,10 @@ export class SalesService {
       orderBy: { dueDate: 'asc' },
     });
   }
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>'"]/g, (character) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]!,
+  );
 }

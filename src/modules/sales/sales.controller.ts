@@ -49,6 +49,12 @@ export class SalesController {
   ) {
     return this.sales.quotationStatus(u.organizationId, id, d.status);
   }
+  @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT) @Post('quotations/:id/send') sendQuotation(
+    @CurrentUser() u: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.sales.sendQuotation(u.organizationId, id);
+  }
   @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT) @Post('quotations/:id/convert') convert(
     @CurrentUser() u: AuthUser,
     @Param('id', ParseUUIDPipe) id: string,

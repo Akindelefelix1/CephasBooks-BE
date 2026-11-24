@@ -4,6 +4,7 @@ import { Type } from 'class-transformer';
 import {
   IsArray,
   ArrayMinSize,
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsNumber,
@@ -27,6 +28,10 @@ export class CreateQuotationDto {
   @IsUUID() customerId!: string;
   @IsOptional() @IsString() number?: string;
   @IsOptional() @IsEnum(SalesDocumentStatus) status?: SalesDocumentStatus;
+  @ApiPropertyOptional({ description: 'Email the saved quotation to the selected customer.' })
+  @IsOptional()
+  @IsBoolean()
+  sendEmail?: boolean;
   @IsOptional() @IsISO4217CurrencyCode() currency?: string;
   @IsDateString() issueDate!: string;
   @IsDateString() expiryDate!: string;
