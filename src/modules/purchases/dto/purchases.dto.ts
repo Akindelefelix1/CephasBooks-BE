@@ -122,3 +122,27 @@ export class ConvertOrderDto {
   @IsDateString() issueDate!: string;
   @IsDateString() dueDate!: string;
 }
+
+export class GoodsReceivedLineDto {
+  @Type(() => Number) @IsNumber() @Min(0) orderLineIndex!: number;
+  @IsOptional() @IsUUID() productId?: string;
+  @Type(() => Number) @IsNumber() @Min(0.0001) receivedQuantity!: number;
+  @Type(() => Number) @IsNumber() @Min(0) acceptedQuantity!: number;
+  @Type(() => Number) @IsNumber() @Min(0) damagedQuantity!: number;
+  @Type(() => Number) @IsNumber() @Min(0) rejectedQuantity!: number;
+  @IsOptional() @IsString() @MaxLength(500) notes?: string;
+}
+
+export class GoodsReceivedNoteDto {
+  @IsUUID() purchaseOrderId!: string;
+  @IsUUID() warehouseId!: string;
+  @IsString() @MaxLength(80) reference!: string;
+  @IsOptional() @IsString() @MaxLength(120) supplierReference?: string;
+  @IsDateString() receivedDate!: string;
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => GoodsReceivedLineDto)
+  items!: GoodsReceivedLineDto[];
+  @IsOptional() @IsString() @MaxLength(2000) notes?: string;
+}

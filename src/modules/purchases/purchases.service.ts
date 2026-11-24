@@ -8,11 +8,15 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.ts';
 import { assertBranch } from '../../common/branch-scope.ts';
-import { postAutomaticJournal, reverseAutomaticJournal } from '../../common/automatic-accounting.ts';
+import {
+  postAutomaticJournal,
+  reverseAutomaticJournal,
+} from '../../common/automatic-accounting.ts';
 import { WorkflowService } from '../workflow/workflow.service.ts';
 import {
   BillDto,
   ExpenseDto,
+  GoodsReceivedNoteDto,
   OrderDto,
   PurchaseLineDto,
   RequestDto,
@@ -203,9 +207,261 @@ export class PurchasesService {
   orders(org: string, q: Record<string, string>) {
     return this.db.purchaseOrder.findMany({
       where: this.filter(org, q),
-      include: { supplier: true, request: true },
+      include: { supplier: true, request: true, goodsReceivedNotes: { select: { items: true } } },
       orderBy: { createdAt: 'desc' },
     });
+  }
+  goodsReceivedNotes(org: string, q: Record<string, string>) {
+    return this.db.goodsReceivedNote.findMany({
+      where: {
+        organizationId: org,
+        ...(q.search
+          ? {
+              OR: [
+                { reference: { contains: q.search, mode: 'insensitive' as const } },
+                { supplierReference: { contains: q.search, mode: 'insensitive' as const } },
+                { purchaseOrder: { number: { contains: q.search, mode: 'insensitive' as const } } },
+                { supplier: { displayName: { contains: q.search, mode: 'insensitive' as const } } },
+              ],
+            }
+          : {}),
+      },
+      include: {
+        supplier: true,
+        purchaseOrder: { select: { id: true, number: true, currency: true, items: true } },
+        warehouse: { select: { id: true, code: true, name: true } },
+        recordedBy: { select: { id: true, email: true, firstName: true, lastName: true } },
+      },
+      orderBy: [{ receivedDate: 'desc' }, { createdAt: 'desc' }],
+    });
+  }
+  async goodsReceivedNoteOptions(org: string) {
+    const [products, warehouses] = await Promise.all([
+      this.db.product.findMany({
+        where: { organizationId: org, isActive: true, type: 'PRODUCT' },
+        select: { id: true, sku: true, name: true, unit: true },
+        orderBy: { name: 'asc' },
+      }),
+      this.db.warehouse.findMany({
+        where: { organizationId: org, isActive: true },
+        select: { id: true, branchId: true, code: true, name: true, isDefault: true },
+        orderBy: { name: 'asc' },
+      }),
+    ]);
+    return { products, warehouses };
+  }
+  async createGoodsReceivedNote(org: string, actorId: string, d: GoodsReceivedNoteDto) {
+    const reference = d.reference.trim();
+    if (!reference) throw new BadRequestException('GRN reference is required');
+    return this.db.$transaction(
+      async (tx) => {
+        const order = await tx.purchaseOrder.findFirst({
+          where: { id: d.purchaseOrderId, organizationId: org },
+        });
+        if (!order) throw new NotFoundException('Purchase order not found');
+        if (['DRAFT', 'CANCELLED'].includes(order.status))
+          throw new BadRequestException('Only an issued purchase order can receive goods');
+        const warehouse = await tx.warehouse.findFirst({
+          where: { id: d.warehouseId, organizationId: org, isActive: true },
+        });
+        if (!warehouse) throw new NotFoundException('Active stock location not found');
+        if (order.branchId && warehouse.branchId !== order.branchId)
+          throw new BadRequestException(
+            'The receiving stock location must belong to the purchase order branch',
+          );
+        const orderItems = Array.isArray(order.items)
+          ? (order.items as Array<Record<string, unknown>>)
+          : [];
+        if (!orderItems.length)
+          throw new BadRequestException('Purchase order has no receivable items');
+        const seen = new Set<number>();
+        for (const line of d.items) {
+          if (
+            !Number.isInteger(line.orderLineIndex) ||
+            line.orderLineIndex < 0 ||
+            line.orderLineIndex >= orderItems.length
+          )
+            throw new BadRequestException('A received item does not match a purchase order line');
+          if (seen.has(line.orderLineIndex))
+            throw new BadRequestException('Each purchase order line can appear only once per GRN');
+          seen.add(line.orderLineIndex);
+          const split = line.acceptedQuantity + line.damagedQuantity + line.rejectedQuantity;
+          if (Math.abs(split - line.receivedQuantity) > 0.00001)
+            throw new BadRequestException(
+              'Received quantity must equal accepted, damaged and rejected quantities',
+            );
+          for (const quantity of [
+            line.receivedQuantity,
+            line.acceptedQuantity,
+            line.damagedQuantity,
+            line.rejectedQuantity,
+          ])
+            if (Math.abs(quantity * 10000 - Math.round(quantity * 10000)) > 0.00001)
+              throw new BadRequestException(
+                'Received quantities can have at most four decimal places',
+              );
+        }
+        const duplicate = await tx.goodsReceivedNote.findFirst({
+          where: { organizationId: org, reference },
+        });
+        if (duplicate) throw new BadRequestException('A GRN with this reference already exists');
+        const prior = await tx.goodsReceivedNote.findMany({
+          where: { organizationId: org, purchaseOrderId: order.id },
+          select: { items: true },
+        });
+        const previouslyReceived = new Map<number, number>();
+        for (const note of prior)
+          for (const item of (Array.isArray(note.items) ? note.items : []) as Array<
+            Record<string, unknown>
+          >) {
+            const index = Number(item.orderLineIndex);
+            previouslyReceived.set(
+              index,
+              (previouslyReceived.get(index) ?? 0) + Number(item.receivedQuantity ?? 0),
+            );
+          }
+        let complete = true;
+        for (const line of d.items) {
+          const ordered = Number(orderItems[line.orderLineIndex]?.quantity ?? 0);
+          const received =
+            (previouslyReceived.get(line.orderLineIndex) ?? 0) + line.receivedQuantity;
+          if (ordered <= 0 || received - ordered > 0.00001)
+            throw new BadRequestException(
+              `Received quantity exceeds the ordered quantity for ${String(orderItems[line.orderLineIndex]?.name ?? 'an item')}`,
+            );
+        }
+        for (let i = 0; i < orderItems.length; i++) {
+          const ordered = Number(orderItems[i]?.quantity ?? 0);
+          const next =
+            (previouslyReceived.get(i) ?? 0) +
+            (d.items.find((item) => item.orderLineIndex === i)?.receivedQuantity ?? 0);
+          if (next + 0.00001 < ordered) complete = false;
+        }
+        const normalizedItems: Array<
+          GoodsReceivedNoteDto['items'][number] & {
+            itemName: string;
+            itemDescription: string;
+            orderedQuantity: number;
+            unitCost: number;
+            outstandingQuantity: number;
+          }
+        > = [];
+        const inventoryProducts = new Map<string, { id: string; name: string }>();
+        for (const line of d.items) {
+          const orderItem = orderItems[line.orderLineIndex];
+          if (!orderItem)
+            throw new BadRequestException('A received item does not match a purchase order line');
+          const mappedProductId =
+            typeof orderItem.productId === 'string' ? orderItem.productId : undefined;
+          if (mappedProductId && line.productId && mappedProductId !== line.productId)
+            throw new BadRequestException(
+              'This purchase order line is already mapped to a different inventory product',
+            );
+          const productId = mappedProductId ?? line.productId;
+          if (line.acceptedQuantity > 0 && !productId)
+            throw new BadRequestException(
+              'Select an inventory product for every accepted quantity',
+            );
+          const product = productId
+            ? await tx.product.findFirst({
+                where: { id: productId, organizationId: org, isActive: true, type: 'PRODUCT' },
+                select: { id: true, name: true },
+              })
+            : null;
+          if (productId && !product)
+            throw new BadRequestException('Select an active inventory product for received goods');
+          if (product) inventoryProducts.set(product.id, product);
+          normalizedItems.push({
+            ...line,
+            productId,
+            itemName: String(orderItem.name ?? ''),
+            itemDescription: String(orderItem.description ?? ''),
+            orderedQuantity: Number(orderItem.quantity ?? 0),
+            unitCost: Number(orderItem.unitPrice ?? 0),
+            outstandingQuantity: Math.max(
+              0,
+              Number(orderItem.quantity ?? 0) -
+                (previouslyReceived.get(line.orderLineIndex) ?? 0) -
+                line.receivedQuantity,
+            ),
+          });
+        }
+        const mappedOrderItems = orderItems.map((item, index) => {
+          const receivedLine = normalizedItems.find((line) => line.orderLineIndex === index);
+          return receivedLine?.productId ? { ...item, productId: receivedLine.productId } : item;
+        });
+        const note = await tx.goodsReceivedNote.create({
+          data: {
+            organizationId: org,
+            purchaseOrderId: order.id,
+            supplierId: order.supplierId,
+            warehouseId: warehouse.id,
+            recordedById: actorId,
+            reference,
+            supplierReference: d.supplierReference?.trim() || null,
+            receivedDate: new Date(`${d.receivedDate.slice(0, 10)}T00:00:00.000Z`),
+            items: normalizedItems as unknown as Prisma.InputJsonValue,
+            notes: d.notes?.trim() || null,
+          },
+        });
+        for (const line of normalizedItems) {
+          if (line.acceptedQuantity <= 0 || !line.productId) continue;
+          const product = inventoryProducts.get(line.productId);
+          if (!product)
+            throw new BadRequestException('Select an active inventory product for accepted goods');
+          const movement = await tx.stockMovement.create({
+            data: {
+              organizationId: org,
+              productId: product.id,
+              warehouseId: warehouse.id,
+              type: 'RECEIPT',
+              quantity: new Prisma.Decimal(line.acceptedQuantity),
+              unitCost: new Prisma.Decimal(line.unitCost),
+              movementDate: new Date(`${d.receivedDate.slice(0, 10)}T00:00:00.000Z`),
+              reference: `${reference}-${line.orderLineIndex + 1}`,
+              performedById: actorId,
+              notes: `Accepted goods from ${reference} / ${order.number}`,
+            },
+          });
+          const stockValue = new Prisma.Decimal(line.acceptedQuantity).mul(line.unitCost);
+          if (stockValue.gt(0))
+            await postAutomaticJournal(tx, {
+              organizationId: org,
+              number: `AUTO-GRN-${movement.id}`,
+              journalDate: movement.movementDate,
+              description: `Inventory receipt ${reference}`,
+              lines: [
+                { accountCode: '1300', debit: stockValue, credit: 0, memo: product.name },
+                { accountCode: '2000', debit: 0, credit: stockValue, memo: 'Inventory received' },
+              ],
+            });
+        }
+        await tx.purchaseOrder.update({
+          where: { id: order.id },
+          data: {
+            status: complete ? 'RECEIVED' : 'PARTIALLY_RECEIVED',
+            items: mappedOrderItems as unknown as Prisma.InputJsonValue,
+          },
+        });
+        await tx.auditLog.create({
+          data: {
+            organizationId: org,
+            actorId,
+            action: 'CREATE',
+            entityType: 'GoodsReceivedNote',
+            entityId: note.id,
+            metadata: {
+              reference,
+              purchaseOrder: order.number,
+              warehouse: warehouse.name,
+              items: normalizedItems,
+            } as unknown as Prisma.InputJsonValue,
+          },
+        });
+        return note;
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
   }
   async createOrder(org: string, d: OrderDto) {
     await assertBranch(this.db, org, d.branchId);
@@ -246,8 +502,8 @@ export class PurchasesService {
     if (!x) throw new NotFoundException('Purchase order not found');
     const allowed: Record<string, string[]> = {
       DRAFT: ['ISSUED', 'CANCELLED'],
-      ISSUED: ['PARTIALLY_RECEIVED', 'RECEIVED', 'CANCELLED'],
-      PARTIALLY_RECEIVED: ['RECEIVED', 'CANCELLED'],
+      ISSUED: ['CANCELLED'],
+      PARTIALLY_RECEIVED: ['CANCELLED'],
       RECEIVED: ['CANCELLED'],
     };
     if (!allowed[x.status]?.includes(status))
@@ -280,26 +536,41 @@ export class PurchasesService {
     }
     const t = this.totals(d.items);
     const currency = await this.currency(org, d.currency);
-    const bill = await this.db.$transaction(async (tx) => {
-      const b = await tx.bill.create({
-        data: {
-          ...d,
-          currency,
-          organizationId: org,
-          issueDate: new Date(d.issueDate),
-          dueDate: new Date(d.dueDate),
-          items: d.items as unknown as Prisma.InputJsonValue,
-          ...t,
-        },
-        include: { supplier: true },
-      });
-      if (d.purchaseOrderId)
-        await tx.purchaseOrder.update({
-          where: { id: d.purchaseOrderId },
-          data: { status: 'BILLED' },
+    const bill = await this.db.$transaction(
+      async (tx) => {
+        if (d.purchaseOrderId) {
+          const existingBill = await tx.bill.findFirst({
+            where: { organizationId: org, purchaseOrderId: d.purchaseOrderId },
+            select: { id: true },
+          });
+          if (existingBill)
+            throw new BadRequestException(
+              'A supplier bill has already been created for this purchase order',
+            );
+        }
+        const b = await tx.bill.create({
+          data: {
+            ...d,
+            currency,
+            organizationId: org,
+            issueDate: new Date(d.issueDate),
+            dueDate: new Date(d.dueDate),
+            items: d.items as unknown as Prisma.InputJsonValue,
+            ...t,
+          },
+          include: { supplier: true },
         });
-      return b;
-    });
+        if (d.purchaseOrderId)
+          await tx.purchaseOrder.update({
+            where: { id: d.purchaseOrderId },
+            data: { status: 'BILLED' },
+          });
+        return b;
+      },
+      d.purchaseOrderId
+        ? { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        : undefined,
+    );
     await this.workflows?.executeEvent(org, 'BILL_CREATED', {
       entityType: 'BILL',
       entityId: bill.id,

@@ -61,7 +61,10 @@ describe('PurchasesService', () => {
       total: new Prisma.Decimal(100),
     });
     const update = jest.fn().mockResolvedValue({});
-    const tx = { bill: { create }, purchaseOrder: { update } };
+    const tx = {
+      bill: { create, findFirst: jest.fn().mockResolvedValue(null) },
+      purchaseOrder: { update },
+    };
     const order = {
       id: 'order',
       organizationId: 'org-a',
@@ -88,5 +91,189 @@ describe('PurchasesService', () => {
     expect((create.mock.calls[0]?.[0] as { data: { number: string } }).data.number).toBe(
       'BILL-00010',
     );
+  });
+
+  it('records a partial GRN and posts only accepted units to inventory', async () => {
+    const grnCreate = jest.fn().mockResolvedValue({ id: 'grn-1', reference: 'GRN-1' });
+    const movementCreate = jest
+      .fn()
+      .mockResolvedValue({ id: 'movement-1', movementDate: new Date('2026-11-24') });
+    const orderUpdate = jest.fn().mockResolvedValue({});
+    const auditCreate = jest.fn().mockResolvedValue({});
+    const order = {
+      id: 'order-1',
+      organizationId: 'org-1',
+      supplierId: 'supplier-1',
+      branchId: null,
+      number: 'PO-1',
+      status: 'ISSUED',
+      items: [{ name: 'Product A', description: 'Product A', quantity: 100, unitPrice: 0 }],
+    };
+    const tx = {
+      goodsReceivedNote: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+        create: grnCreate,
+      },
+      product: { findFirst: jest.fn().mockResolvedValue({ id: 'product-1', name: 'Product A' }) },
+      stockMovement: { create: movementCreate },
+      purchaseOrder: { findFirst: jest.fn().mockResolvedValue(order), update: orderUpdate },
+      warehouse: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'warehouse-1', name: 'Main', branchId: null }),
+      },
+      auditLog: { create: auditCreate },
+    };
+    const service = new PurchasesService({
+      $transaction: jest
+        .fn()
+        .mockImplementation((operation: (client: typeof tx) => unknown) => operation(tx)),
+    } as never);
+
+    await service.createGoodsReceivedNote('org-1', 'user-1', {
+      purchaseOrderId: 'order-1',
+      warehouseId: 'warehouse-1',
+      reference: 'GRN-1',
+      receivedDate: '2026-11-24',
+      items: [
+        {
+          orderLineIndex: 0,
+          productId: 'product-1',
+          receivedQuantity: 80,
+          acceptedQuantity: 70,
+          damagedQuantity: 10,
+          rejectedQuantity: 0,
+        },
+      ],
+    });
+
+    expect(movementCreate).toHaveBeenCalledTimes(1);
+    expect(
+      (
+        movementCreate.mock.calls[0]?.[0] as {
+          data: { quantity: Prisma.Decimal; type: string; performedById: string };
+        }
+      ).data,
+    ).toMatchObject({
+      type: 'RECEIPT',
+      performedById: 'user-1',
+      quantity: new Prisma.Decimal(70),
+    });
+    expect(orderUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'order-1' },
+        data: expect.objectContaining({
+          status: 'PARTIALLY_RECEIVED',
+          items: expect.arrayContaining([expect.objectContaining({ productId: 'product-1' })]),
+        }),
+      }),
+    );
+  });
+
+  it('rejects a receipt when the accepted, damaged and rejected quantities do not equal received', async () => {
+    const tx = {
+      purchaseOrder: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'order-1',
+          status: 'ISSUED',
+          branchId: null,
+          items: [{ name: 'Product A', quantity: 100 }],
+        }),
+      },
+      warehouse: { findFirst: jest.fn().mockResolvedValue({ id: 'warehouse-1', branchId: null }) },
+    };
+    const service = new PurchasesService({
+      $transaction: jest
+        .fn()
+        .mockImplementation((operation: (client: typeof tx) => unknown) => operation(tx)),
+    } as never);
+    await expect(
+      service.createGoodsReceivedNote('org-1', 'user-1', {
+        purchaseOrderId: 'order-1',
+        warehouseId: 'warehouse-1',
+        reference: 'GRN-2',
+        receivedDate: '2026-11-24',
+        items: [
+          {
+            orderLineIndex: 0,
+            receivedQuantity: 80,
+            acceptedQuantity: 79,
+            damagedQuantity: 0,
+            rejectedQuantity: 0,
+          },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects a GRN that would exceed the purchase order after prior partial receipts', async () => {
+    const tx = {
+      purchaseOrder: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'order-1',
+          status: 'PARTIALLY_RECEIVED',
+          branchId: null,
+          items: [{ name: 'Product A', quantity: 100 }],
+        }),
+      },
+      warehouse: { findFirst: jest.fn().mockResolvedValue({ id: 'warehouse-1', branchId: null }) },
+      goodsReceivedNote: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest
+          .fn()
+          .mockResolvedValue([{ items: [{ orderLineIndex: 0, receivedQuantity: 80 }] }]),
+      },
+    };
+    const service = new PurchasesService({
+      $transaction: jest
+        .fn()
+        .mockImplementation((operation: (client: typeof tx) => unknown) => operation(tx)),
+    } as never);
+    await expect(
+      service.createGoodsReceivedNote('org-1', 'user-1', {
+        purchaseOrderId: 'order-1',
+        warehouseId: 'warehouse-1',
+        reference: 'GRN-3',
+        receivedDate: '2026-11-24',
+        items: [
+          {
+            orderLineIndex: 0,
+            productId: 'product-1',
+            receivedQuantity: 21,
+            acceptedQuantity: 21,
+            damagedQuantity: 0,
+            rejectedQuantity: 0,
+          },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('prevents a second bill when receipt status changes after an order was billed', async () => {
+    const create = jest.fn();
+    const tx = {
+      bill: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'existing-bill' }),
+        create,
+      },
+    };
+    const service = new PurchasesService({
+      supplier: { findFirst: jest.fn().mockResolvedValue({ id: 'supplier-1' }) },
+      purchaseOrder: { findFirst: jest.fn().mockResolvedValue({ id: 'order-1' }) },
+      organization: { findUniqueOrThrow: jest.fn().mockResolvedValue({ baseCurrency: 'NGN' }) },
+      $transaction: jest
+        .fn()
+        .mockImplementation((operation: (client: typeof tx) => unknown) => operation(tx)),
+    } as never);
+    await expect(
+      service.createBill('org-1', {
+        supplierId: 'supplier-1',
+        purchaseOrderId: 'order-1',
+        number: 'BILL-2',
+        issueDate: '2026-11-24',
+        dueDate: '2026-12-24',
+        items: [{ name: 'Product A', description: 'Product A', quantity: 1, unitPrice: 10 }],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(create).not.toHaveBeenCalled();
   });
 });

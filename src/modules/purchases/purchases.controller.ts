@@ -21,6 +21,7 @@ import {
   ConvertOrderDto,
   ExpenseDto,
   ExpenseStatusDto,
+  GoodsReceivedNoteDto,
   OrderDto,
   OrderStatusDto,
   RequestDto,
@@ -94,6 +95,20 @@ export class PurchasesController {
     @Body() d: OrderDto,
   ) {
     return this.s.createOrder(u.organizationId, d);
+  }
+  @Get('goods-received-notes') goodsReceivedNotes(
+    @CurrentUser() u: AuthUser,
+    @Query() q: Record<string, string>,
+  ) {
+    return this.s.goodsReceivedNotes(u.organizationId, q);
+  }
+  @Get('goods-received-notes/options') goodsReceivedNoteOptions(@CurrentUser() u: AuthUser) {
+    return this.s.goodsReceivedNoteOptions(u.organizationId);
+  }
+  @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT)
+  @Post('goods-received-notes')
+  createGoodsReceivedNote(@CurrentUser() u: AuthUser, @Body() d: GoodsReceivedNoteDto) {
+    return this.s.createGoodsReceivedNote(u.organizationId, u.sub, d);
   }
   @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT) @Patch('orders/:id/status') orderStatus(
     @CurrentUser() u: AuthUser,

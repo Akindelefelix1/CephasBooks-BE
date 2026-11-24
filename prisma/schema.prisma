@@ -210,30 +210,31 @@ enum WorkflowStatus {
 }
 
 model User {
-  id                        String                @id @default(uuid()) @db.Uuid
-  email                     String                @unique
-  passwordHash              String
-  firstName                 String?
-  lastName                  String?
-  phone                     String?
-  address                   String?
-  mustChangePassword        Boolean               @default(false)
-  passwordChangedAt         DateTime?
-  isActive                  Boolean               @default(true)
-  verifiedAt                DateTime?
-  verificationCodeHash      String?
-  verificationCodeExpiresAt DateTime?
-  verificationCodeSentAt    DateTime?
-  createdAt                 DateTime              @default(now())
-  updatedAt                 DateTime              @updatedAt
-  memberships               Membership[]
-  sessions                  Session[]
-  auditLogs                 AuditLog[]
-  notificationReceipts      NotificationReceipt[]
-  bankTransactionReversals  BankTransaction[]     @relation("BankTransactionReversedBy")
-  assignedPosRegisters      PosRegister[]         @relation("PosRegisterAssignedStaff")
-  cashierPosShifts          PosShift[]            @relation("PosShiftCashier")
-  stockMovementsPerformed   StockMovement[]       @relation("StockMovementActor")
+  id                         String                @id @default(uuid()) @db.Uuid
+  email                      String                @unique
+  passwordHash               String
+  firstName                  String?
+  lastName                   String?
+  phone                      String?
+  address                    String?
+  mustChangePassword         Boolean               @default(false)
+  passwordChangedAt          DateTime?
+  isActive                   Boolean               @default(true)
+  verifiedAt                 DateTime?
+  verificationCodeHash       String?
+  verificationCodeExpiresAt  DateTime?
+  verificationCodeSentAt     DateTime?
+  createdAt                  DateTime              @default(now())
+  updatedAt                  DateTime              @updatedAt
+  memberships                Membership[]
+  sessions                   Session[]
+  auditLogs                  AuditLog[]
+  notificationReceipts       NotificationReceipt[]
+  bankTransactionReversals   BankTransaction[]     @relation("BankTransactionReversedBy")
+  assignedPosRegisters       PosRegister[]         @relation("PosRegisterAssignedStaff")
+  cashierPosShifts           PosShift[]            @relation("PosShiftCashier")
+  stockMovementsPerformed    StockMovement[]       @relation("StockMovementActor")
+  goodsReceivedNotesRecorded GoodsReceivedNote[]   @relation("GoodsReceivedNoteRecorder")
 }
 
 model Organization {
@@ -270,6 +271,7 @@ model Organization {
   suppliers             Supplier[]
   purchaseRequests      PurchaseRequest[]
   purchaseOrders        PurchaseOrder[]
+  goodsReceivedNotes    GoodsReceivedNote[]
   bills                 Bill[]
   supplierPayments      SupplierPayment[]
   expenses              Expense[]
@@ -666,25 +668,26 @@ model Branch {
 }
 
 model Warehouse {
-  id               String            @id @default(uuid()) @db.Uuid
-  organizationId   String            @db.Uuid
-  branchId         String?           @unique @db.Uuid
-  code             String
-  name             String
-  address          String?
-  manager          String?
-  isDefault        Boolean           @default(false)
-  isActive         Boolean           @default(true)
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
-  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  branch           Branch?           @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  movements        StockMovement[]
-  adjustments      StockAdjustment[]
-  posRegisters     PosRegister[]
-  posSales         PosSale[]
-  defaultProducts  Product[]         @relation("ProductDefaultWarehouse")
-  commerceChannels CommerceChannel[]
+  id                 String              @id @default(uuid()) @db.Uuid
+  organizationId     String              @db.Uuid
+  branchId           String?             @unique @db.Uuid
+  code               String
+  name               String
+  address            String?
+  manager            String?
+  isDefault          Boolean             @default(false)
+  isActive           Boolean             @default(true)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branch             Branch?             @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  movements          StockMovement[]
+  adjustments        StockAdjustment[]
+  posRegisters       PosRegister[]
+  posSales           PosSale[]
+  defaultProducts    Product[]           @relation("ProductDefaultWarehouse")
+  commerceChannels   CommerceChannel[]
+  goodsReceivedNotes GoodsReceivedNote[]
 
   @@unique([organizationId, code])
   @@index([organizationId, isActive])
@@ -1030,26 +1033,27 @@ model BankTransaction {
 }
 
 model Supplier {
-  id             String            @id @default(uuid()) @db.Uuid
-  organizationId String            @db.Uuid
-  branchId       String?           @db.Uuid
-  displayName    String
-  companyName    String?
-  email          String?
-  phone          String?
-  taxId          String?
-  bankDetails    String?
-  paymentTerms   String?
-  address        String?
-  notes          String?
-  isActive       Boolean           @default(true)
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
-  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  orders         PurchaseOrder[]
-  bills          Bill[]
-  payments       SupplierPayment[]
-  expenses       Expense[]
+  id                 String              @id @default(uuid()) @db.Uuid
+  organizationId     String              @db.Uuid
+  branchId           String?             @db.Uuid
+  displayName        String
+  companyName        String?
+  email              String?
+  phone              String?
+  taxId              String?
+  bankDetails        String?
+  paymentTerms       String?
+  address            String?
+  notes              String?
+  isActive           Boolean             @default(true)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  orders             PurchaseOrder[]
+  bills              Bill[]
+  payments           SupplierPayment[]
+  expenses           Expense[]
+  goodsReceivedNotes GoodsReceivedNote[]
 
   @@unique([organizationId, email])
   @@index([organizationId, displayName])
@@ -1079,27 +1083,28 @@ model PurchaseRequest {
 }
 
 model PurchaseOrder {
-  id             String              @id @default(uuid()) @db.Uuid
-  organizationId String              @db.Uuid
-  branchId       String?             @db.Uuid
-  supplierId     String              @db.Uuid
-  requestId      String?             @unique @db.Uuid
-  number         String
-  orderDate      DateTime            @db.Date
-  deliveryDate   DateTime            @db.Date
-  status         PurchaseOrderStatus @default(DRAFT)
-  currency       String              @default("NGN") @db.Char(3)
-  items          Json
-  subtotal       Decimal             @db.Decimal(19, 4)
-  taxTotal       Decimal             @default(0) @db.Decimal(19, 4)
-  total          Decimal             @db.Decimal(19, 4)
-  notes          String?
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
-  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  supplier       Supplier            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
-  request        PurchaseRequest?    @relation(fields: [requestId], references: [id], onDelete: Restrict)
-  bills          Bill[]
+  id                 String              @id @default(uuid()) @db.Uuid
+  organizationId     String              @db.Uuid
+  branchId           String?             @db.Uuid
+  supplierId         String              @db.Uuid
+  requestId          String?             @unique @db.Uuid
+  number             String
+  orderDate          DateTime            @db.Date
+  deliveryDate       DateTime            @db.Date
+  status             PurchaseOrderStatus @default(DRAFT)
+  currency           String              @default("NGN") @db.Char(3)
+  items              Json
+  subtotal           Decimal             @db.Decimal(19, 4)
+  taxTotal           Decimal             @default(0) @db.Decimal(19, 4)
+  total              Decimal             @db.Decimal(19, 4)
+  notes              String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  supplier           Supplier            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  request            PurchaseRequest?    @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  bills              Bill[]
+  goodsReceivedNotes GoodsReceivedNote[]
 
   @@unique([organizationId, number])
   @@index([organizationId, status])
@@ -1133,6 +1138,31 @@ model Bill {
   @@unique([organizationId, number])
   @@index([organizationId, status, dueDate])
   @@index([organizationId, branchId])
+}
+
+model GoodsReceivedNote {
+  id                String        @id @default(uuid()) @db.Uuid
+  organizationId    String        @db.Uuid
+  purchaseOrderId   String        @db.Uuid
+  supplierId        String        @db.Uuid
+  warehouseId       String        @db.Uuid
+  recordedById      String?       @db.Uuid
+  reference         String
+  supplierReference String?
+  receivedDate      DateTime      @db.Date
+  items             Json
+  notes             String?
+  createdAt         DateTime      @default(now())
+  organization      Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  purchaseOrder     PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  supplier          Supplier      @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  warehouse         Warehouse     @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  recordedBy        User?         @relation("GoodsReceivedNoteRecorder", fields: [recordedById], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, reference])
+  @@index([organizationId, receivedDate])
+  @@index([organizationId, purchaseOrderId])
+  @@index([organizationId, supplierId])
 }
 
 model SupplierPayment {
