@@ -77,9 +77,18 @@ export class InsightsService {
       }),
       this.db.project.findMany({
         where: { organizationId: org },
-        select: { status: true, budget: true, actualCost: true, revenue: true },
+        select: { id: true, status: true, budget: true, openingActualCost: true, revenue: true },
       }),
     ]);
+    const projectExpenses = await this.db.expense.groupBy({
+      by: ['projectId'],
+      where: { organizationId: org, projectId: { not: null }, status: 'APPROVED' },
+      _sum: { amount: true, taxAmount: true },
+    });
+    const projectExpenseTotals = new Map(projectExpenses.map((x) => [
+      x.projectId,
+      (x._sum.amount ?? new Prisma.Decimal(0)).sub(x._sum.taxAmount ?? new Prisma.Decimal(0)),
+    ]));
     const sum = (
       items: Array<{ amount?: Prisma.Decimal; total?: Prisma.Decimal }>,
       key: 'amount' | 'total',
@@ -144,7 +153,7 @@ export class InsightsService {
       ).map(([label, value]) => ({ label, value })),
       projects: {
         budget: projects.reduce((n, x) => n.add(x.budget), new Prisma.Decimal(0)),
-        actualCost: projects.reduce((n, x) => n.add(x.actualCost), new Prisma.Decimal(0)),
+        actualCost: projects.reduce((n, x) => n.add(x.openingActualCost).add(projectExpenseTotals.get(x.id) ?? 0), new Prisma.Decimal(0)),
         revenue: projects.reduce((n, x) => n.add(x.revenue), new Prisma.Decimal(0)),
       },
     };

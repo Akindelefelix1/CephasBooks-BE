@@ -163,6 +163,9 @@ export class PurchasesController {
   @Get('expenses') expenses(@CurrentUser() u: AuthUser, @Query() q: Record<string, string>) {
     return this.s.expenses(u.organizationId, q);
   }
+  @Get('projects') projectOptions(@CurrentUser() u: AuthUser) {
+    return this.s.projectOptions(u.organizationId);
+  }
   @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT, Role.MEMBER) @Post('expenses') createExpense(
     @CurrentUser() u: AuthUser,
     @Body() d: ExpenseDto,

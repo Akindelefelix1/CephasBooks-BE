@@ -25,6 +25,8 @@ export class InvoiceItemDto {
 
 export class CreateInvoiceDto {
   @ApiPropertyOptional() @IsOptional() @IsUUID() branchId?: string;
+  @ApiPropertyOptional({ description: 'Optional project used to classify later customer payments.' })
+  @IsOptional() @IsUUID() projectId?: string;
   @ApiProperty() @IsUUID() customerId!: string;
   @ApiPropertyOptional({ readOnly: true }) @IsOptional() @IsString() @MaxLength(50) number?: string;
   @ApiPropertyOptional({ description: 'Email the invoice and customer statement after saving.' })

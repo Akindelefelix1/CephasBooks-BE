@@ -37,7 +37,7 @@ export class SalesService {
     };
   }
   async summary(org: string) {
-    const [customers, quotes, invoices, payments, credits] = await this.prisma.$transaction([
+    const [customers, quotes, invoices, generalPayments, projectPayments, credits] = await this.prisma.$transaction([
       this.prisma.customer.count({ where: { organizationId: org, isActive: true } }),
       this.prisma.quotation.count({
         where: { organizationId: org, status: { notIn: ['CONVERTED', 'VOID'] } },
@@ -47,7 +47,11 @@ export class SalesService {
         _sum: { total: true, paidAmount: true, creditedAmount: true },
       }),
       this.prisma.paymentReceived.aggregate({
-        where: { organizationId: org },
+        where: { organizationId: org, projectId: null },
+        _sum: { amount: true },
+      }),
+      this.prisma.paymentReceived.aggregate({
+        where: { organizationId: org, projectId: { not: null } },
         _sum: { amount: true },
       }),
       this.prisma.creditNote.aggregate({
@@ -62,7 +66,8 @@ export class SalesService {
       customers,
       openQuotations: quotes,
       invoiced: total,
-      received: payments._sum.amount ?? 0,
+      received: generalPayments._sum.amount ?? 0,
+      projectReceived: projectPayments._sum.amount ?? 0,
       credited: credits._sum.amount ?? 0,
       receivable: total.sub(paid).sub(credited),
     };
@@ -275,7 +280,10 @@ export class SalesService {
             }
           : {}),
       },
-      include: { customer: true, invoice: true },
+      include: {
+        customer: true,
+        invoice: { include: { project: { select: { id: true, code: true, name: true } } } },
+      },
       orderBy: { paymentDate: 'desc' },
     });
   }
@@ -311,6 +319,7 @@ export class SalesService {
           ...d,
           organizationId: org,
           branchId: d.branchId ?? inv.branchId,
+          projectId: inv.projectId,
           customerId: inv.customerId,
           currency: inv.currency,
           paymentDate: new Date(d.paymentDate),

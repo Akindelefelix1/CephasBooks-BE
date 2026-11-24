@@ -186,6 +186,12 @@ export class OperationsController {
   @Get('projects') projects(@CurrentUser() u: AuthUser, @Query() q: Record<string, string>) {
     return this.operations.projects(u.organizationId, q);
   }
+  @Get('projects/:id/variance') projectVariance(
+    @CurrentUser() u: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.operations.projectVariance(u.organizationId, id);
+  }
   @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT) @Post('projects') createProject(
     @CurrentUser() u: AuthUser,
     @Body() d: ProjectDto,

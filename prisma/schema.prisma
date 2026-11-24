@@ -743,23 +743,26 @@ model StockAdjustment {
 }
 
 model Project {
-  id             String        @id @default(uuid()) @db.Uuid
-  organizationId String        @db.Uuid
-  code           String
-  name           String
-  client         String?
-  owner          String
-  startDate      DateTime      @db.Date
-  endDate        DateTime?     @db.Date
-  budget         Decimal       @default(0) @db.Decimal(19, 4)
-  actualCost     Decimal       @default(0) @db.Decimal(19, 4)
-  revenue        Decimal       @default(0) @db.Decimal(19, 4)
-  status         ProjectStatus @default(PLANNED)
-  description    String?
-  tasks          Json          @default("[]")
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
-  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  id                String            @id @default(uuid()) @db.Uuid
+  organizationId    String            @db.Uuid
+  code              String
+  name              String
+  client            String?
+  owner             String
+  startDate         DateTime          @db.Date
+  endDate           DateTime?         @db.Date
+  budget            Decimal           @default(0) @db.Decimal(19, 4)
+  openingActualCost Decimal           @default(0) @db.Decimal(19, 4)
+  revenue           Decimal           @default(0) @db.Decimal(19, 4)
+  status            ProjectStatus     @default(PLANNED)
+  description       String?
+  tasks             Json              @default("[]")
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  organization      Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  expenses          Expense[]
+  invoices          Invoice[]
+  payments          PaymentReceived[]
 
   @@unique([organizationId, code])
   @@index([organizationId, status])
@@ -841,6 +844,7 @@ model Invoice {
   id              String            @id @default(uuid()) @db.Uuid
   organizationId  String            @db.Uuid
   branchId        String?           @db.Uuid
+  projectId       String?           @db.Uuid
   customerId      String            @db.Uuid
   number          String
   status          InvoiceStatus     @default(DRAFT)
@@ -858,6 +862,7 @@ model Invoice {
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
   organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  project         Project?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
   customer        Customer          @relation(fields: [customerId], references: [id], onDelete: Restrict)
   items           InvoiceItem[]
   payments        PaymentReceived[]
@@ -866,6 +871,7 @@ model Invoice {
   @@unique([organizationId, number])
   @@index([organizationId, status])
   @@index([organizationId, branchId])
+  @@index([organizationId, projectId])
   @@index([customerId])
 }
 
@@ -899,6 +905,7 @@ model PaymentReceived {
   id             String       @id @default(uuid()) @db.Uuid
   organizationId String       @db.Uuid
   branchId       String?      @db.Uuid
+  projectId      String?      @db.Uuid
   customerId     String       @db.Uuid
   invoiceId      String       @db.Uuid
   reference      String
@@ -911,10 +918,12 @@ model PaymentReceived {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   customer       Customer     @relation(fields: [customerId], references: [id], onDelete: Restrict)
   invoice        Invoice      @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  project        Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
   @@unique([organizationId, reference])
   @@index([organizationId, paymentDate])
   @@index([organizationId, branchId])
+  @@index([organizationId, projectId, paymentDate])
 }
 
 model CreditNote {
@@ -1193,6 +1202,7 @@ model Expense {
   id             String        @id @default(uuid()) @db.Uuid
   organizationId String        @db.Uuid
   branchId       String?       @db.Uuid
+  projectId      String?       @db.Uuid
   supplierId     String?       @db.Uuid
   bankAccountId  String?       @db.Uuid
   reference      String
@@ -1208,10 +1218,12 @@ model Expense {
   updatedAt      DateTime      @updatedAt
   organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   supplier       Supplier?     @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  project        Project?      @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
   @@unique([organizationId, reference])
   @@index([organizationId, status, expenseDate])
   @@index([organizationId, branchId])
+  @@index([organizationId, projectId, status])
 }
 
 model LedgerAccount {

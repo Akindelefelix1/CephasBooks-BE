@@ -622,7 +622,6 @@ describe('OperationsService', () => {
         owner: 'Owner',
         startDate: '2026-09-16',
         budget: 100,
-        actualCost: 0,
         revenue: 0,
       }),
     ).rejects.toBeInstanceOf(NotFoundException);
@@ -639,7 +638,6 @@ describe('OperationsService', () => {
       startDate: '2026-09-16',
       endDate: '2026-09-18',
       budget: 5_000_000,
-      actualCost: 4_800_000,
       revenue: 450_000,
     });
     const data = (create.mock.calls[0]?.[0] as { data: Record<string, unknown> }).data;

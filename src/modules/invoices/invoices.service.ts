@@ -19,10 +19,18 @@ export class InvoicesService {
       where: { organizationId },
       include: {
         customer: true,
+        project: { select: { id: true, code: true, name: true } },
         items: true,
         organization: { select: { name: true, countryCode: true } },
       },
       orderBy: { createdAt: 'desc' },
+    });
+  }
+  projects(organizationId: string) {
+    return this.prisma.project.findMany({
+      where: { organizationId, status: { not: 'CANCELLED' } },
+      select: { id: true, code: true, name: true },
+      orderBy: { name: 'asc' },
     });
   }
   async nextNumber(organizationId: string) {
@@ -41,6 +49,7 @@ export class InvoicesService {
       where: { id, organizationId },
       include: {
         customer: true,
+        project: { select: { id: true, code: true, name: true } },
         items: true,
         organization: { select: { name: true, countryCode: true } },
       },
@@ -54,6 +63,8 @@ export class InvoicesService {
       where: { id: dto.customerId, organizationId, isActive: true },
     });
     if (!customer) throw new BadRequestException('Customer does not belong to this organization');
+    if (dto.projectId && !(await this.prisma.project.findFirst({ where: { id: dto.projectId, organizationId } })))
+      throw new BadRequestException('Project does not belong to this organization');
     if (new Date(dto.dueDate) < new Date(dto.issueDate))
       throw new BadRequestException('Due date cannot be before issue date');
     const items = dto.items.map((item) => {
@@ -68,14 +79,13 @@ export class InvoicesService {
     const lineTotal = items.reduce((sum, item) => sum.add(item.lineTotal), new Prisma.Decimal(0));
     const shippingAmount = new Prisma.Decimal(dto.shippingAmount ?? 0);
     const number = (await this.nextNumber(organizationId)).number;
-    const currency =
-      dto.currency?.toUpperCase() ??
-      (
-        await this.prisma.organization.findUniqueOrThrow({
-          where: { id: organizationId },
-          select: { baseCurrency: true },
-        })
-      ).baseCurrency;
+    const baseCurrency = (await this.prisma.organization.findUniqueOrThrow({
+      where: { id: organizationId },
+      select: { baseCurrency: true },
+    })).baseCurrency;
+    const currency = dto.currency?.toUpperCase() ?? baseCurrency;
+    if (dto.projectId && currency !== baseCurrency)
+      throw new BadRequestException('Project invoices must use the organization base currency for variance reporting');
     const sendEmail = dto.sendEmail === true;
     const invoice = await this.prisma.$transaction(async (tx) => {
       const created = await tx.invoice.create({
@@ -83,6 +93,7 @@ export class InvoicesService {
         organizationId,
         branchId: dto.branchId ?? customer.branchId,
         customerId: dto.customerId,
+        projectId: dto.projectId,
         number,
         status: 'DRAFT',
         currency,

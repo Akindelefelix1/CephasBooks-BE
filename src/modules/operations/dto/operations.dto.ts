@@ -106,7 +106,6 @@ export class ProjectDto {
   @IsDateString() startDate!: string;
   @IsOptional() @IsDateString() endDate?: string;
   @Type(() => Number) @IsNumber() @Min(0) budget!: number;
-  @Type(() => Number) @IsNumber() @Min(0) actualCost!: number;
   @Type(() => Number) @IsNumber() @Min(0) revenue!: number;
   @IsOptional() @IsEnum(ProjectStatus) status?: ProjectStatus;
   @IsOptional() @IsString() description?: string;

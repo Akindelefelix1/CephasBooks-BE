@@ -790,14 +790,24 @@ export class PurchasesService {
             }
           : {}),
       },
-      include: { supplier: true },
+      include: { supplier: true, project: { select: { id: true, code: true, name: true } } },
       orderBy: { expenseDate: 'desc' },
     });
   }
   async createExpense(org: string, d: ExpenseDto) {
     await assertBranch(this.db, org, d.branchId);
     if (d.supplierId) await this.supplier(org, d.supplierId);
+    if (d.projectId && !(await this.db.project.findFirst({ where: { id: d.projectId, organizationId: org } })))
+      throw new BadRequestException('Project does not belong to this organization');
     const currency = await this.currency(org, d.currency);
+    if (d.projectId) {
+      const baseCurrency = (await this.db.organization.findUniqueOrThrow({
+        where: { id: org },
+        select: { baseCurrency: true },
+      })).baseCurrency;
+      if (currency !== baseCurrency)
+        throw new BadRequestException('Project expenses must use the organization base currency for variance reporting');
+    }
     const expense = await this.db.expense.create({
       data: {
         ...d,
@@ -816,6 +826,13 @@ export class PurchasesService {
       amount: Number(expense.amount),
     });
     return expense;
+  }
+  projectOptions(org: string) {
+    return this.db.project.findMany({
+      where: { organizationId: org, status: { not: 'CANCELLED' } },
+      select: { id: true, code: true, name: true },
+      orderBy: { name: 'asc' },
+    });
   }
   async expenseStatus(org: string, id: string, status: ExpenseStatus) {
     return this.db.$transaction(async (tx) => {

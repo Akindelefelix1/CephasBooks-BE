@@ -17,6 +17,9 @@ export class InvoicesController {
   @Get() list(@CurrentUser() user: AuthUser) {
     return this.invoices.list(user.organizationId);
   }
+  @Get('projects') projects(@CurrentUser() user: AuthUser) {
+    return this.invoices.projects(user.organizationId);
+  }
   @Get('next-number') nextNumber(@CurrentUser() user: AuthUser) {
     return this.invoices.nextNumber(user.organizationId);
   }

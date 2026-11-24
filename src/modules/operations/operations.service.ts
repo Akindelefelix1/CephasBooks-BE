@@ -961,8 +961,8 @@ export class OperationsService {
     });
   }
 
-  projects(org: string, q: Record<string, string>) {
-    return this.db.project.findMany({
+  async projects(org: string, q: Record<string, string>) {
+    const projects = await this.db.project.findMany({
       where: {
         organizationId: org,
         ...(q.status ? { status: q.status as never } : {}),
@@ -978,12 +978,71 @@ export class OperationsService {
       },
       orderBy: { createdAt: 'desc' },
     });
+    const ids = projects.map((project) => project.id);
+    const [expenses, payments] = ids.length ? await Promise.all([
+      this.db.expense.groupBy({ by: ['projectId'], where: { organizationId: org, projectId: { in: ids }, status: 'APPROVED' }, _sum: { amount: true, taxAmount: true } }),
+      this.db.paymentReceived.groupBy({ by: ['projectId'], where: { organizationId: org, projectId: { in: ids } }, _sum: { amount: true } }),
+    ]) : [[], []];
+    const costs = new Map(expenses.map((x) => [
+      x.projectId,
+      (x._sum.amount ?? new Prisma.Decimal(0)).sub(x._sum.taxAmount ?? new Prisma.Decimal(0)),
+    ]));
+    const receipts = new Map(payments.map((x) => [x.projectId, x._sum.amount ?? new Prisma.Decimal(0)]));
+    return projects.map((project) => {
+      const actualCost = project.openingActualCost.add(costs.get(project.id) ?? 0);
+      const actualRevenue = receipts.get(project.id) ?? new Prisma.Decimal(0);
+      return {
+        ...project,
+        actualCost,
+        actualRevenue,
+        costVariance: actualCost.sub(project.budget),
+        costVariancePercent: project.budget.isZero() ? 0 : actualCost.sub(project.budget).abs().div(project.budget).mul(100),
+        costVarianceType: actualCost.lte(project.budget) ? 'FAVORABLE' : 'UNFAVORABLE',
+        revenueVariance: actualRevenue.sub(project.revenue),
+        revenueVariancePercent: project.revenue.isZero() ? 0 : actualRevenue.sub(project.revenue).abs().div(project.revenue).mul(100),
+        revenueVarianceType: actualRevenue.gte(project.revenue) ? 'FAVORABLE' : 'UNFAVORABLE',
+      };
+    });
+  }
+  async projectVariance(org: string, id: string) {
+    const project = await this.db.project.findFirst({ where: { id, organizationId: org } });
+    if (!project) throw new NotFoundException('Project not found');
+    const [expenses, payments] = await Promise.all([
+      this.db.expense.findMany({ where: { organizationId: org, projectId: id }, include: { supplier: true }, orderBy: { expenseDate: 'desc' } }),
+      this.db.paymentReceived.findMany({ where: { organizationId: org, projectId: id }, include: { customer: true, invoice: true }, orderBy: { paymentDate: 'desc' } }),
+    ]);
+    const actualCost = expenses.filter((x) => x.status === 'APPROVED').reduce(
+      (sum, x) => sum.add(x.amount.sub(x.taxAmount)),
+      project.openingActualCost,
+    );
+    const actualRevenue = payments.reduce((sum, x) => sum.add(x.amount), new Prisma.Decimal(0));
+    const costVariance = actualCost.sub(project.budget);
+    const revenueVariance = actualRevenue.sub(project.revenue);
+    return {
+      project: { ...project, actualCost, actualRevenue },
+      summary: {
+        budgetedCost: project.budget, actualCost, costVariance: costVariance.abs(),
+        costVarianceSigned: costVariance,
+        costVariancePercent: project.budget.isZero() ? 0 : costVariance.abs().div(project.budget).mul(100),
+        costVarianceType: costVariance.lte(0) ? 'FAVORABLE' : 'UNFAVORABLE',
+        expectedRevenue: project.revenue, actualRevenue, revenueVariance: revenueVariance.abs(),
+        revenueVarianceSigned: revenueVariance,
+        revenueVariancePercent: project.revenue.isZero() ? 0 : revenueVariance.abs().div(project.revenue).mul(100),
+        revenueVarianceType: revenueVariance.gte(0) ? 'FAVORABLE' : 'UNFAVORABLE',
+      },
+      expenses: expenses.map((expense) => ({
+        ...expense,
+        amount: expense.amount.sub(expense.taxAmount),
+      })),
+      payments,
+    };
   }
   createProject(org: string, d: ProjectDto) {
     this.validateProject(d);
     return this.db.project.create({
       data: {
         ...d,
+        openingActualCost: 0,
         startDate: this.dateOnly(d.startDate),
         endDate: d.endDate ? this.dateOnly(d.endDate) : undefined,
         tasks: (d.tasks ?? []) as Prisma.InputJsonValue,

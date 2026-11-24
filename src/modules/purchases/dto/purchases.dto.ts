@@ -94,6 +94,7 @@ export class SupplierPaymentDto {
 }
 export class ExpenseDto {
   @IsOptional() @IsUUID() branchId?: string;
+  @IsOptional() @IsUUID() projectId?: string;
   @IsOptional() @IsUUID() supplierId?: string;
   @IsOptional() @IsUUID() bankAccountId?: string;
   @IsString() reference!: string;

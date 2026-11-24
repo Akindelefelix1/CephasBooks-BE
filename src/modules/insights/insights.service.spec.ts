@@ -23,6 +23,7 @@ describe('InsightsService', () => {
           ]),
       },
       expense: {
+        groupBy: jest.fn().mockResolvedValue([]),
         findMany: jest
           .fn()
           .mockResolvedValue([
@@ -64,7 +65,7 @@ describe('InsightsService', () => {
             {
               status: 'ACTIVE',
               budget: decimal(50),
-              actualCost: decimal(20),
+              openingActualCost: decimal(20),
               revenue: decimal(10),
             },
           ]),
