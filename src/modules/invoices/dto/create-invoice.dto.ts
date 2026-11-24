@@ -1,12 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { InvoiceStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
   IsDateString,
   IsBoolean,
-  IsEnum,
   IsISO4217CurrencyCode,
   IsNumber,
   IsOptional,
@@ -29,7 +27,6 @@ export class CreateInvoiceDto {
   @ApiPropertyOptional() @IsOptional() @IsUUID() branchId?: string;
   @ApiProperty() @IsUUID() customerId!: string;
   @ApiPropertyOptional({ readOnly: true }) @IsOptional() @IsString() @MaxLength(50) number?: string;
-  @ApiProperty({ enum: InvoiceStatus }) @IsOptional() @IsEnum(InvoiceStatus) status?: InvoiceStatus;
   @ApiPropertyOptional({ description: 'Email the invoice and customer statement after saving.' })
   @IsOptional() @IsBoolean() sendEmail?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsISO4217CurrencyCode() currency?: string;

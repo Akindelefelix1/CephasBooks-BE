@@ -40,9 +40,8 @@ export class CustomersService {
     await this.get(organizationId, id);
     return this.prisma.invoice.findMany({
       where: { organizationId, customerId: id },
-      include: { customer: true, items: true },
+      include: { customer: true, items: true, payments: true, creditNotes: true },
       orderBy: [{ issueDate: 'desc' }, { createdAt: 'desc' }],
-      take: 200,
     });
   }
   async update(organizationId: string, id: string, dto: UpdateCustomerDto) {

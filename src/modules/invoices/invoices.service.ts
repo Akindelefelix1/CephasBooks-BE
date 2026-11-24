@@ -84,7 +84,7 @@ export class InvoicesService {
         branchId: dto.branchId ?? customer.branchId,
         customerId: dto.customerId,
         number,
-        status: sendEmail ? 'DRAFT' : (dto.status ?? 'DRAFT'),
+        status: 'DRAFT',
         currency,
         issueDate: new Date(dto.issueDate),
         dueDate: new Date(dto.dueDate),

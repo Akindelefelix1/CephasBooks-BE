@@ -20,9 +20,8 @@ describe('CustomersService tenant isolation', () => {
     await expect(service.purchaseHistory('org-a', 'customer-id')).resolves.toEqual([]);
     expect(findMany).toHaveBeenCalledWith({
       where: { organizationId: 'org-a', customerId: 'customer-id' },
-      include: { customer: true, items: true },
+      include: { customer: true, items: true, payments: true, creditNotes: true },
       orderBy: [{ issueDate: 'desc' }, { createdAt: 'desc' }],
-      take: 200,
     });
   });
 });
