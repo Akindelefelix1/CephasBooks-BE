@@ -785,6 +785,7 @@ model Customer {
   id             String            @id @default(uuid()) @db.Uuid
   organizationId String            @db.Uuid
   branchId       String?           @db.Uuid
+  name           String?
   displayName    String
   companyName    String?
   email          String?
@@ -973,6 +974,7 @@ model BankTransaction {
   name                 String               @default("")
   description          String
   reference            String?
+  receiptUrl           String?
   type                 BankTransactionType
   amount               Decimal              @db.Decimal(19, 4)
   balanceAfter         Decimal              @db.Decimal(19, 4)

@@ -11,6 +11,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  IsUrl,
   Length,
   MaxLength,
   Min,
@@ -46,6 +47,11 @@ export class CreateBankTransactionDto {
   @ApiProperty() @IsString() @MaxLength(160) name!: string;
   @ApiProperty() @IsString() @MaxLength(240) description!: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(100) reference?: string;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUrl({ protocols: ['https'], require_protocol: true })
+  @MaxLength(2048)
+  receiptUrl?: string;
   @ApiProperty({ enum: BankTransactionType })
   @IsEnum(BankTransactionType)
   type!: BankTransactionType;
@@ -54,12 +60,20 @@ export class CreateBankTransactionDto {
 }
 export class CreateBankTransactionsDto {
   @ApiProperty() @IsUUID() bankAccountId!: string;
+  @ApiPropertyOptional() @IsOptional() @IsUUID() branchId?: string;
   @ApiProperty() @IsDateString() transactionDate!: string;
-  @ApiProperty({ enum: BankTransactionType }) @IsEnum(BankTransactionType) type!: BankTransactionType;
+  @ApiProperty({ enum: BankTransactionType })
+  @IsEnum(BankTransactionType)
+  type!: BankTransactionType;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(1000) notes?: string;
   @ApiProperty({ type: [CreateBankTransactionDto] })
-  @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => CreateBankTransactionDto)
-  transactions!: Array<Pick<CreateBankTransactionDto, 'name' | 'description' | 'reference' | 'amount'>>;
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => CreateBankTransactionDto)
+  transactions!: Array<
+    Pick<CreateBankTransactionDto, 'name' | 'description' | 'reference' | 'receiptUrl' | 'amount'>
+  >;
 }
 export class ReconcileTransactionDto {
   @ApiProperty({ enum: ReconciliationStatus })

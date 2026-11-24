@@ -4,6 +4,7 @@ import { Type } from 'class-transformer';
 
 export class CreateCustomerDto {
   @ApiPropertyOptional() @IsOptional() @IsUUID() branchId?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(160) name?: string;
   @ApiProperty() @IsString() @MaxLength(160) displayName!: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(160) companyName?: string;
   @ApiPropertyOptional() @IsOptional() @IsEmail() @MaxLength(254) email?: string;

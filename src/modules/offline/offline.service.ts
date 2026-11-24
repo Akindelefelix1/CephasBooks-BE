@@ -146,10 +146,10 @@ export class OfflineService {
       load('purchases.view', '/purchases/payments?search=&status=', () => purchases.payments(org, {})),
       load('purchases.view', '/purchases/payables?search=&status=', () => purchases.payables(org, {})),
       load('purchases.view', '/purchases/expenses?search=&status=', () => purchases.expenses(org, {})),
-      load('banking.view', '/banking/summary', () => banking.summary(org)),
-      load('banking.view', '/banking/accounts?includeArchived=false', () => banking.accounts(org)),
-      load('banking.view', '/banking/accounts?includeArchived=true', () => banking.accounts(org, true)),
-      load('banking.view', '/banking/transactions?', async () => {
+      loadAny(['banking.view', 'banking.accounts.view', 'banking.manage'], '/banking/summary', () => banking.summary(org)),
+      loadAny(['banking.view', 'banking.accounts.view', 'banking.manage'], '/banking/accounts?includeArchived=false', () => banking.accounts(org)),
+      loadAny(['banking.view', 'banking.accounts.view', 'banking.manage'], '/banking/accounts?includeArchived=true', () => banking.accounts(org, true)),
+      loadAny(['banking.view', 'banking.transactions.view', 'banking.manage'], '/banking/transactions?', async () => {
         const first = await banking.transactions(org, { page: '1', limit: '100' });
         if (first.meta.pages <= 1) return first;
         const pages = await fetchPages(first.meta.pages, (page) =>
@@ -157,7 +157,31 @@ export class OfflineService {
         );
         return { ...first, data: [...first.data, ...pages.flatMap((page) => page.data)], meta: { ...first.meta, pages: 1, limit: first.meta.total } };
       }),
-      load('banking.view', '/banking/transactions/reversals', () => banking.reversalHistory(org)),
+      loadAny(['banking.view', 'banking.transactions.view', 'banking.manage'], '/banking/transactions/reversals', () => banking.reversalHistory(org)),
+      loadAny(
+        ['banking.reconciliation.view', 'banking.view', 'banking.manage'],
+        '/banking/transactions?status=UNRECONCILED',
+        async () => {
+          const first = await banking.transactions(org, {
+            status: 'UNRECONCILED',
+            page: '1',
+            limit: '100',
+          });
+          if (first.meta.pages <= 1) return first;
+          const pages = await fetchPages(first.meta.pages, (page) =>
+            banking.transactions(org, {
+              status: 'UNRECONCILED',
+              page: String(page),
+              limit: '100',
+            }),
+          );
+          return {
+            ...first,
+            data: [...first.data, ...pages.flatMap((page) => page.data)],
+            meta: { ...first.meta, pages: 1, limit: first.meta.total },
+          };
+        },
+      ),
       load('accounting.view', '/accounting/summary', () => accounting.summary(org)),
       load('accounting.view', '/accounting/accounts?includeArchived=false', () => accounting.accounts(org, false)),
       load('accounting.view', '/accounting/accounts?includeArchived=true', () => accounting.accounts(org, true)),

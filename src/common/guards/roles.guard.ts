@@ -16,8 +16,7 @@ export class RolesGuard implements CanActivate {
       .switchToHttp()
       .getRequest<{ user: AuthUser; method: string; url: string }>();
     const user = request.user;
-    if (!user.customRoleId)
-      return !roles?.length || roles.includes(user.role as Role);
+    if (!user.customRoleId) return !roles?.length || roles.includes(user.role as Role);
     // An endpoint explicitly reserved to the owner can never be delegated by a
     // custom access level (for example organisation deletion).
     if (roles?.length === 1 && roles[0] === Role.OWNER) return false;
@@ -45,13 +44,43 @@ export class RolesGuard implements CanActivate {
     )
       return true;
     const required = this.permissionFor(request.method, request.url);
-    if (required) return Boolean(user.permissions?.includes(required));
+    if (required) {
+      if (user.permissions?.includes(required)) return true;
+      if (
+        required.startsWith('banking.') &&
+        required.endsWith('.view') &&
+        user.permissions?.includes('banking.view')
+      )
+        return true;
+      if (
+        required.startsWith('banking.') &&
+        required.endsWith('.view') &&
+        user.permissions?.includes('banking.manage')
+      )
+        return true;
+      if (
+        required.startsWith('banking.') &&
+        required.endsWith('.manage') &&
+        user.permissions?.includes('banking.manage')
+      )
+        return true;
+      return false;
+    }
     return !roles?.length || roles.includes(user.role as Role);
   }
 
   private permissionFor(method: string, url: string): string | null {
     const action = method === 'GET' ? 'view' : 'manage';
-    if (/\/banking(?:\/|\?|$)/.test(url)) return `banking.${action}`;
+    if (
+      method === 'GET' &&
+      /\/banking\/transactions(?:\?|$)/.test(url) &&
+      /(?:\?|&)status=UNRECONCILED(?:&|$)/.test(url)
+    )
+      return 'banking.reconciliation.view';
+    if (/\/banking\/transactions\/.*reconciliation/.test(url))
+      return `banking.reconciliation.${action}`;
+    if (/\/banking\/transactions/.test(url)) return `banking.transactions.${action}`;
+    if (/\/banking(?:\/|\?|$)/.test(url)) return `banking.accounts.${action}`;
     if (/\/(sales|invoices|customers|pos)(?:\/|\?|$)/.test(url)) return `sales.${action}`;
     if (/\/purchases(?:\/|\?|$)/.test(url)) return `purchases.${action}`;
     if (/\/accounting(?:\/|\?|$)/.test(url)) return `accounting.${action}`;

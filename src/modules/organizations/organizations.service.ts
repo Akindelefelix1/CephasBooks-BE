@@ -35,6 +35,9 @@ const COUNTRY_CODES: Record<string, string> = {
 const ROLE_PERMISSIONS = [
   'dashboard.view',
   'banking.view',
+  'banking.accounts.view',
+  'banking.transactions.view',
+  'banking.reconciliation.view',
   'banking.manage',
   'sales.view',
   'sales.manage',
@@ -353,26 +356,26 @@ export class OrganizationsService {
     const membership = await this.prisma.$transaction(async (tx) => {
       const user = existing
         ? await tx.user.update({
-          where: { id: existing.id },
-          data: {
-            firstName: dto.firstName?.trim() || undefined,
-            lastName: dto.lastName?.trim() || undefined,
-            phone: dto.phone?.trim() || undefined,
-            address: dto.address?.trim() || undefined,
-          },
-        })
+            where: { id: existing.id },
+            data: {
+              firstName: dto.firstName?.trim() || undefined,
+              lastName: dto.lastName?.trim() || undefined,
+              phone: dto.phone?.trim() || undefined,
+              address: dto.address?.trim() || undefined,
+            },
+          })
         : await tx.user.create({
-          data: {
-            email,
-            passwordHash: await argon2.hash(temporaryPassword!),
-            firstName: dto.firstName?.trim() || null,
-            lastName: dto.lastName?.trim() || null,
-            phone: dto.phone?.trim() || null,
-            address: dto.address?.trim() || null,
-            verifiedAt: new Date(),
-            mustChangePassword: true,
-          },
-        });
+            data: {
+              email,
+              passwordHash: await argon2.hash(temporaryPassword!),
+              firstName: dto.firstName?.trim() || null,
+              lastName: dto.lastName?.trim() || null,
+              phone: dto.phone?.trim() || null,
+              address: dto.address?.trim() || null,
+              verifiedAt: new Date(),
+              mustChangePassword: true,
+            },
+          });
       const membership = await tx.membership.create({
         data: {
           userId: user.id,
@@ -447,7 +450,10 @@ export class OrganizationsService {
   }
 
   private escapeHtml(value: string) {
-    return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
+    return value.replace(
+      /[&<>"']/g,
+      (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!,
+    );
   }
 
   async updateUser(actor: AuthUser, id: string, dto: UpdateOrganizationUserDto) {
@@ -953,12 +959,19 @@ export class OrganizationsService {
     }
     if (section === 'branches' && Array.isArray(items)) {
       const branches = items.map((item) => item as Record<string, unknown>);
-      const hierarchy = data.hierarchy && typeof data.hierarchy === 'object' && !Array.isArray(data.hierarchy)
-        ? (data.hierarchy as Record<string, unknown>)
-        : {};
+      const hierarchy =
+        data.hierarchy && typeof data.hierarchy === 'object' && !Array.isArray(data.hierarchy)
+          ? (data.hierarchy as Record<string, unknown>)
+          : {};
       const hierarchyLevels = hierarchy.levels === 2 ? 2 : 3;
       const labels = ['topLabel', 'middleLabel', 'locationLabel'];
-      if (labels.some((key) => hierarchy[key] !== undefined && (typeof hierarchy[key] !== 'string' || !String(hierarchy[key]).trim())))
+      if (
+        labels.some(
+          (key) =>
+            hierarchy[key] !== undefined &&
+            (typeof hierarchy[key] !== 'string' || !String(hierarchy[key]).trim()),
+        )
+      )
         throw new BadRequestException('Every location hierarchy label must be a non-empty name');
       const states = Array.isArray(data.states)
         ? data.states.map((item) => item as Record<string, unknown>)
@@ -986,7 +999,8 @@ export class OrganizationsService {
         const stateNames = states.map((item) => String(item.name).trim().toLowerCase());
         if (new Set(stateNames).size !== stateNames.length)
           throw new ConflictException('State names must be unique');
-        if (hierarchyLevels === 3 && (
+        if (
+          hierarchyLevels === 3 &&
           regions.some(
             (item) =>
               !validId(item.id) ||
@@ -994,7 +1008,7 @@ export class OrganizationsService {
               typeof item.name !== 'string' ||
               !item.name.trim(),
           )
-        ))
+        )
           throw new BadRequestException('Every region requires a valid state and name');
         if (new Set(regionIds).size !== regionIds.length)
           throw new ConflictException('Region ids must be unique');
@@ -1005,7 +1019,9 @@ export class OrganizationsService {
           throw new ConflictException('Region names must be unique within a state');
         const validParentIds = hierarchyLevels === 2 ? stateIds : regionIds;
         if (branches.some((item) => !validId(item.id) || !validParentIds.includes(item.regionId)))
-          throw new BadRequestException('Every operating location requires a valid parent location');
+          throw new BadRequestException(
+            'Every operating location requires a valid parent location',
+          );
       }
       const names = branches.map((item) => (typeof item.name === 'string' ? item.name.trim() : ''));
       if (names.some((name) => !name))

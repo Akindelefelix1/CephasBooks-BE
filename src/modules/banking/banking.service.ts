@@ -3,7 +3,10 @@ import { BankTransactionType, Prisma, ReconciliationStatus } from '@prisma/clien
 import { createHash, randomUUID } from 'node:crypto';
 import { PrismaService } from '../../database/prisma.service.ts';
 import { assertBranch } from '../../common/branch-scope.ts';
-import { postAutomaticJournal, reverseAutomaticJournal } from '../../common/automatic-accounting.ts';
+import {
+  postAutomaticJournal,
+  reverseAutomaticJournal,
+} from '../../common/automatic-accounting.ts';
 import {
   CreateBankAccountDto,
   CreateBankTransactionDto,
@@ -141,10 +144,14 @@ export class BankingService {
 
   async createAccount(organizationId: string, dto: CreateBankAccountDto) {
     const openingBalance = new Prisma.Decimal(dto.openingBalance);
-    const currency = dto.currency?.toUpperCase() ?? (await this.prisma.organization.findUniqueOrThrow({
-      where: { id: organizationId },
-      select: { baseCurrency: true },
-    })).baseCurrency;
+    const currency =
+      dto.currency?.toUpperCase() ??
+      (
+        await this.prisma.organization.findUniqueOrThrow({
+          where: { id: organizationId },
+          select: { baseCurrency: true },
+        })
+      ).baseCurrency;
     return this.serializable(async (tx) => {
       const account = await tx.bankAccount.create({
         data: {
@@ -310,6 +317,7 @@ export class BankingService {
           name: dto.name,
           description: dto.description,
           reference: dto.reference,
+          receiptUrl: dto.receiptUrl,
           type: dto.type,
           amount,
           balanceAfter: account.currentBalance,
@@ -323,7 +331,7 @@ export class BankingService {
   }
 
   async createTransactions(organizationId: string, dto: CreateBankTransactionsDto) {
-    await assertBranch(this.prisma, organizationId, undefined);
+    await assertBranch(this.prisma, organizationId, dto.branchId);
     const account = await this.account(organizationId, dto.bankAccountId);
     if (!account.isActive) throw new BadRequestException('Bank account is archived');
     return this.serializable(async (tx) => {
@@ -332,11 +340,13 @@ export class BankingService {
         const transaction = await tx.bankTransaction.create({
           data: {
             organizationId,
+            branchId: dto.branchId,
             bankAccountId: dto.bankAccountId,
             transactionDate: new Date(dto.transactionDate),
             name: row.name,
             description: row.description,
             reference: row.reference,
+            receiptUrl: row.receiptUrl,
             type: dto.type,
             amount: new Prisma.Decimal(row.amount),
             balanceAfter: account.currentBalance,
