@@ -3,6 +3,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsDateString,
+  IsInt,
   IsEmail,
   IsEnum,
   IsISO4217CurrencyCode,
@@ -11,6 +12,7 @@ import {
   IsString,
   IsUUID,
   MaxLength,
+  Max,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -36,6 +38,7 @@ export class SupplierDto {
   @IsOptional() @IsString() taxId?: string;
   @IsOptional() @IsString() bankDetails?: string;
   @IsOptional() @IsString() paymentTerms?: string;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(0) @Max(3650) paymentTermsDays?: number;
   @IsOptional() @IsString() address?: string;
   @IsOptional() @IsString() notes?: string;
 }
@@ -73,7 +76,7 @@ export class BillDto {
   @IsOptional() @IsUUID() purchaseOrderId?: string;
   @IsString() number!: string;
   @IsDateString() issueDate!: string;
-  @IsDateString() dueDate!: string;
+  @IsOptional() @IsDateString() dueDate?: string;
   @IsOptional() @IsISO4217CurrencyCode() currency?: string;
   @IsArray()
   @ArrayMinSize(1)
@@ -121,7 +124,7 @@ export class ExpenseStatusDto {
 export class ConvertOrderDto {
   @IsOptional() @IsString() number?: string;
   @IsDateString() issueDate!: string;
-  @IsDateString() dueDate!: string;
+  @IsOptional() @IsDateString() dueDate?: string;
 }
 
 export class GoodsReceivedLineDto {

@@ -35,7 +35,8 @@ export class CreateInvoiceDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(1000) creditLimitOverrideReason?: string;
   @ApiPropertyOptional() @IsOptional() @IsISO4217CurrencyCode() currency?: string;
   @ApiProperty() @IsDateString() issueDate!: string;
-  @ApiProperty() @IsDateString() dueDate!: string;
+  @ApiPropertyOptional({ description: 'If omitted, calculated from the customer payment terms.' })
+  @IsOptional() @IsDateString() dueDate?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(2000) notes?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(1000) shippingAddress?: string;
   @ApiPropertyOptional({ default: 0 })

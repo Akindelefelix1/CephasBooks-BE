@@ -854,6 +854,7 @@ model Customer {
   taxId                   String?
   billingAddress          String?
   notes                   String?
+  paymentTermsDays        Int                              @default(30)
   creditLimit             Decimal                          @default(0) @db.Decimal(19, 4)
   isActive                Boolean                          @default(true)
   createdAt               DateTime                         @default(now())
@@ -1121,6 +1122,7 @@ model Supplier {
   taxId              String?
   bankDetails        String?
   paymentTerms       String?
+  paymentTermsDays   Int                 @default(30)
   address            String?
   notes              String?
   isActive           Boolean             @default(true)

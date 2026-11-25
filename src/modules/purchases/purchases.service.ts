@@ -13,6 +13,7 @@ import {
   reverseAutomaticJournal,
 } from '../../common/automatic-accounting.ts';
 import { WorkflowService } from '../workflow/workflow.service.ts';
+import { addPaymentTermDays, parsePaymentTermDays, paymentTermLabel } from '../../common/payment-terms.ts';
 import {
   BillDto,
   ExpenseDto,
@@ -95,7 +96,7 @@ export class PurchasesService {
         _sum: { total: true },
       }),
       this.db.bill.aggregate({
-        where: { organizationId: org, status: { notIn: ['PAID', 'VOID'] } },
+        where: { organizationId: org, status: { in: ['APPROVED', 'PARTIALLY_PAID', 'OVERDUE'] } },
         _sum: { total: true, paidAmount: true },
       }),
       this.db.expense.aggregate({
@@ -122,11 +123,29 @@ export class PurchasesService {
   }
   async createSupplier(org: string, d: SupplierDto) {
     await assertBranch(this.db, org, d.branchId);
-    return this.db.supplier.create({ data: { ...d, organizationId: org } });
+    const paymentTermsDays = d.paymentTermsDays ?? parsePaymentTermDays(d.paymentTerms);
+    return this.db.supplier.create({
+      data: {
+        ...d,
+        paymentTermsDays,
+        paymentTerms: d.paymentTermsDays === undefined ? d.paymentTerms : paymentTermLabel(paymentTermsDays),
+        organizationId: org,
+      },
+    });
   }
   async updateSupplier(org: string, id: string, d: SupplierDto) {
-    await this.supplier(org, id);
-    return this.db.supplier.update({ where: { id }, data: d });
+    const current = await this.supplier(org, id);
+    const paymentTermsDays = d.paymentTermsDays ?? (d.paymentTerms !== undefined
+      ? parsePaymentTermDays(d.paymentTerms)
+      : current.paymentTermsDays);
+    return this.db.supplier.update({
+      where: { id },
+      data: {
+        ...d,
+        paymentTermsDays,
+        paymentTerms: d.paymentTermsDays !== undefined ? paymentTermLabel(paymentTermsDays) : d.paymentTerms,
+      },
+    });
   }
   async archiveSupplier(org: string, id: string) {
     await this.supplier(org, id);
@@ -520,9 +539,8 @@ export class PurchasesService {
   }
   async createBill(org: string, d: BillDto) {
     await assertBranch(this.db, org, d.branchId);
-    await this.supplier(org, d.supplierId);
-    if (new Date(d.dueDate) < new Date(d.issueDate))
-      throw new BadRequestException('Due date cannot be before issue date');
+    const supplier = await this.supplier(org, d.supplierId);
+    const dueDate = addPaymentTermDays(d.issueDate, supplier.paymentTermsDays);
     if (d.purchaseOrderId) {
       const o = await this.db.purchaseOrder.findFirst({
         where: {
@@ -554,7 +572,7 @@ export class PurchasesService {
             currency,
             organizationId: org,
             issueDate: new Date(d.issueDate),
-            dueDate: new Date(d.dueDate),
+            dueDate,
             items: d.items as unknown as Prisma.InputJsonValue,
             ...t,
           },
@@ -583,7 +601,7 @@ export class PurchasesService {
   async orderToBill(
     org: string,
     id: string,
-    d: { number?: string; issueDate: string; dueDate: string },
+    d: { number?: string; issueDate: string; dueDate?: string },
   ) {
     const o = await this.db.purchaseOrder.findFirst({
       where: {
@@ -668,11 +686,33 @@ export class PurchasesService {
   }
   async payables(org: string, q: Record<string, string>) {
     await this.markOverdue(org);
+    const payableStatuses = ['APPROVED', 'PARTIALLY_PAID', 'OVERDUE'];
     return this.db.bill.findMany({
-      where: { ...this.filter(org, q), status: { notIn: ['PAID', 'VOID'] } },
+      where: {
+        ...this.filter(org, { ...q, status: '' }),
+        status: q.status && payableStatuses.includes(q.status)
+          ? q.status as BillStatus
+          : { in: payableStatuses as BillStatus[] },
+        ...this.dueDateFilter(q.duePeriod),
+      },
       include: { supplier: true },
       orderBy: { dueDate: 'asc' },
     });
+  }
+  private dueDateFilter(period?: string) {
+    if (!period) return {};
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const after = (days: number) => {
+      const date = new Date(today);
+      date.setUTCDate(date.getUTCDate() + days);
+      return date;
+    };
+    if (period === 'OVERDUE') return { dueDate: { lt: today } };
+    if (period === 'DUE_7') return { dueDate: { gte: today, lte: after(7) } };
+    if (period === 'DUE_8_30') return { dueDate: { gt: after(7), lte: after(30) } };
+    if (period === 'DUE_30_PLUS') return { dueDate: { gt: after(30) } };
+    return {};
   }
   async createPayment(org: string, d: SupplierPaymentDto) {
     await assertBranch(this.db, org, d.branchId);

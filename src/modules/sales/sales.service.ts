@@ -11,6 +11,7 @@ import { CreditNoteDto, CreateQuotationDto, PaymentDto } from './dto/sales.dto.t
 import { assertBranch } from '../../common/branch-scope.ts';
 import { postAutomaticJournal, reverseAutomaticJournal } from '../../common/automatic-accounting.ts';
 import { lockCustomerCredit } from '../customers/customer-credit.ts';
+import { addPaymentTermDays } from '../../common/payment-terms.ts';
 @Injectable()
 export class SalesService {
   constructor(
@@ -49,7 +50,7 @@ export class SalesService {
         where: { organizationId: org, status: { notIn: ['CONVERTED', 'VOID'] } },
       }),
       this.prisma.invoice.aggregate({
-        where: { organizationId: org, status: { not: 'VOID' } },
+        where: { organizationId: org, status: { notIn: ['DRAFT', 'VOID'] } },
         _sum: { total: true, paidAmount: true, creditedAmount: true },
       }),
       this.prisma.paymentReceived.aggregate({
@@ -248,7 +249,7 @@ export class SalesService {
           status: 'DRAFT',
           currency: quote.currency,
           issueDate: new Date(),
-          dueDate: new Date(Date.now() + 30 * 86400000),
+          dueDate: addPaymentTermDays(new Date(), quote.customer.paymentTermsDays),
           subtotal: quote.subtotal,
           taxTotal: quote.taxTotal,
           total: quote.total,
@@ -515,10 +516,12 @@ export class SalesService {
     });
   }
   receivables(org: string, q: Record<string, string>) {
+    const dueDate = this.dueDateFilter(q.duePeriod);
     return this.prisma.invoice.findMany({
       where: {
         organizationId: org,
-        status: { notIn: ['PAID', 'VOID'] },
+        status: { in: ['SENT', 'PARTIALLY_PAID', 'OVERDUE'] },
+        ...dueDate,
         ...(q.search
           ? { customer: { displayName: { contains: q.search, mode: 'insensitive' } } }
           : {}),
@@ -526,6 +529,21 @@ export class SalesService {
       include: { customer: true },
       orderBy: { dueDate: 'asc' },
     });
+  }
+  private dueDateFilter(period?: string) {
+    if (!period) return {};
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const after = (days: number) => {
+      const date = new Date(today);
+      date.setUTCDate(date.getUTCDate() + days);
+      return date;
+    };
+    if (period === 'OVERDUE') return { dueDate: { lt: today } };
+    if (period === 'DUE_7') return { dueDate: { gte: today, lte: after(7) } };
+    if (period === 'DUE_8_30') return { dueDate: { gt: after(7), lte: after(30) } };
+    if (period === 'DUE_30_PLUS') return { dueDate: { gt: after(30) } };
+    return {};
   }
 }
 

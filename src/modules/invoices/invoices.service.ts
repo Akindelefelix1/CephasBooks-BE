@@ -7,6 +7,7 @@ import { MailService } from '../mail/mail.service.ts';
 import { assertBranch } from '../../common/branch-scope.ts';
 import { postAutomaticJournal } from '../../common/automatic-accounting.ts';
 import { customerCreditExposure, lockCustomerCredit, requireCreditOverride } from '../customers/customer-credit.ts';
+import { addPaymentTermDays } from '../../common/payment-terms.ts';
 
 @Injectable()
 export class InvoicesService {
@@ -67,8 +68,7 @@ export class InvoicesService {
     if (!customer) throw new BadRequestException('Customer does not belong to this organization');
     if (dto.projectId && !(await this.prisma.project.findFirst({ where: { id: dto.projectId, organizationId } })))
       throw new BadRequestException('Project does not belong to this organization');
-    if (new Date(dto.dueDate) < new Date(dto.issueDate))
-      throw new BadRequestException('Due date cannot be before issue date');
+    const dueDate = addPaymentTermDays(dto.issueDate, customer.paymentTermsDays);
     const items = dto.items.map((item) => {
       const base = new Prisma.Decimal(item.quantity).mul(item.unitPrice);
       const tax = base.mul(item.taxRate).div(100);
@@ -100,7 +100,7 @@ export class InvoicesService {
         status: 'DRAFT',
         currency,
         issueDate: new Date(dto.issueDate),
-        dueDate: new Date(dto.dueDate),
+        dueDate,
         notes: dto.notes,
         shippingAddress: dto.shippingAddress,
         shippingAmount,
