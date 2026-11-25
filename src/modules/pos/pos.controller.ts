@@ -14,6 +14,7 @@ import {
   ListPosSalesDto,
   OpenShiftDto,
   ReturnPosSaleDto,
+  RecordPosCreditPaymentDto,
   UpdateRegisterDto,
   UpdatePosReceiptSignaturesDto,
   VoidPosSaleDto,
@@ -113,6 +114,14 @@ export class PosController {
     @Body() data: UpdatePosReceiptSignaturesDto,
   ) {
     return this.pos.updateReceiptSignatures(u.organizationId, id, data);
+  }
+  @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT)
+  @Post('sales/:id/credit-payments') recordCreditPayment(
+    @CurrentUser() u: AuthUser,
+    @Param('id') id: string,
+    @Body() data: RecordPosCreditPaymentDto,
+  ) {
+    return this.pos.recordCreditPayment(u.organizationId, u.sub, id, data);
   }
   @Roles(Role.OWNER, Role.ADMIN)
   @Post('sales/:id/returns')

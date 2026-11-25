@@ -3,14 +3,15 @@ import {
   ArrayMinSize,
   IsArray,
   IsBoolean,
+  IsDateString,
   IsEnum,
   IsOptional,
   IsString,
   IsUUID,
   MaxLength,
   Min,
-  IsDateString,
   IsInt,
+  IsIn,
   Max,
   IsNumber,
   Matches,
@@ -45,6 +46,12 @@ export class CompletePosSaleDto {
   @IsOptional() @IsString() @MaxLength(128) idempotencyKey?: string;
   @IsOptional() @IsBoolean() creditLimitOverride?: boolean;
   @IsOptional() @IsString() @MaxLength(1000) creditLimitOverrideReason?: string;
+}
+export class RecordPosCreditPaymentDto {
+  @Type(() => Number) @IsNumber({ maxDecimalPlaces: 4 }) @Min(0.01) amount!: number;
+  @IsIn(['CASH', 'CARD', 'TRANSFER']) method!: 'CASH' | 'CARD' | 'TRANSFER';
+  @IsDateString() paymentDate!: string;
+  @IsOptional() @IsString() @MaxLength(128) reference?: string;
 }
 export class UpdatePosReceiptSignaturesDto {
   @IsOptional()

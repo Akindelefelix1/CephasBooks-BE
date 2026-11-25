@@ -10,6 +10,7 @@ import { MailService } from '../mail/mail.service.ts';
 import { CreditNoteDto, CreateQuotationDto, PaymentDto } from './dto/sales.dto.ts';
 import { assertBranch } from '../../common/branch-scope.ts';
 import { postAutomaticJournal, reverseAutomaticJournal } from '../../common/automatic-accounting.ts';
+import { lockCustomerCredit } from '../customers/customer-credit.ts';
 @Injectable()
 export class SalesService {
   constructor(
@@ -296,7 +297,12 @@ export class SalesService {
   async recordPayment(org: string, d: PaymentDto) {
     await assertBranch(this.prisma, org, d.branchId);
     return this.prisma.$transaction(async (tx) => {
-      const inv = await tx.invoice.findFirst({
+      let inv = await tx.invoice.findFirst({
+        where: { id: d.invoiceId, organizationId: org, status: { notIn: ['VOID', 'DRAFT'] } },
+      });
+      if (!inv) throw new NotFoundException('Invoice not found');
+      await lockCustomerCredit(tx, org, inv.customerId);
+      inv = await tx.invoice.findFirst({
         where: { id: d.invoiceId, organizationId: org, status: { notIn: ['VOID', 'DRAFT'] } },
       });
       if (!inv) throw new NotFoundException('Invoice not found');
@@ -363,6 +369,12 @@ export class SalesService {
   }
   async reversePayment(org: string, id: string) {
     return this.prisma.$transaction(async (tx) => {
+      const initial = await tx.paymentReceived.findFirst({
+        where: { id, organizationId: org },
+        include: { invoice: { select: { customerId: true } } },
+      });
+      if (!initial) throw new NotFoundException('Payment not found');
+      await lockCustomerCredit(tx, org, initial.invoice.customerId);
       const p = await tx.paymentReceived.findFirst({ where: { id, organizationId: org } });
       if (!p) throw new NotFoundException('Payment not found');
       await reverseAutomaticJournal(tx, {
@@ -373,8 +385,9 @@ export class SalesService {
         description: `Reverse customer receipt ${p.reference}`,
       });
       await tx.paymentReceived.delete({ where: { id } });
-      const inv = await tx.invoice.findUniqueOrThrow({ where: { id: p.invoiceId } }),
-        paid = inv.paidAmount.sub(p.amount);
+      const inv = await tx.invoice.findFirst({ where: { id: p.invoiceId, organizationId: org } });
+      if (!inv) throw new NotFoundException('Invoice not found');
+      const paid = inv.paidAmount.sub(p.amount);
       await tx.invoice.update({
         where: { id: inv.id },
         data: {
@@ -409,7 +422,12 @@ export class SalesService {
   async createCreditNote(org: string, d: CreditNoteDto) {
     await assertBranch(this.prisma, org, d.branchId);
     return this.prisma.$transaction(async (tx) => {
-      const inv = await tx.invoice.findFirst({
+      let inv = await tx.invoice.findFirst({
+        where: { id: d.invoiceId, organizationId: org, status: { not: 'VOID' } },
+      });
+      if (!inv) throw new NotFoundException('Invoice not found');
+      await lockCustomerCredit(tx, org, inv.customerId);
+      inv = await tx.invoice.findFirst({
         where: { id: d.invoiceId, organizationId: org, status: { not: 'VOID' } },
       });
       if (!inv) throw new NotFoundException('Invoice not found');
@@ -462,6 +480,12 @@ export class SalesService {
   }
   async voidCredit(org: string, id: string) {
     return this.prisma.$transaction(async (tx) => {
+      const initial = await tx.creditNote.findFirst({
+        where: { id, organizationId: org, isVoid: false },
+        include: { invoice: { select: { customerId: true } } },
+      });
+      if (!initial) throw new NotFoundException('Credit note not found');
+      await lockCustomerCredit(tx, org, initial.invoice.customerId);
       const note = await tx.creditNote.findFirst({
         where: { id, organizationId: org, isVoid: false },
       });

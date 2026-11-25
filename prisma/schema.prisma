@@ -237,6 +237,7 @@ model User {
   goodsReceivedNotesRecorded GoodsReceivedNote[]              @relation("GoodsReceivedNoteRecorder")
   customerCreditAdjustments  CustomerCreditLimitAdjustment[]  @relation("CustomerCreditLimitAdjustmentActor")
   customerCreditApprovals    CustomerCreditOverrideApproval[] @relation("CustomerCreditOverrideApprover")
+  posCreditPaymentsReceived  PosCreditPayment[]               @relation("PosCreditPaymentReceiver")
 }
 
 model Organization {
@@ -259,6 +260,7 @@ model Organization {
   customers                 Customer[]
   customerCreditAdjustments CustomerCreditLimitAdjustment[]
   customerCreditApprovals   CustomerCreditOverrideApproval[]
+  posCreditPayments         PosCreditPayment[]
   invoices                  Invoice[]
   posSales                  PosSale[]
   posRegisters              PosRegister[]
@@ -486,37 +488,38 @@ model Product {
 }
 
 model PosSale {
-  id                    String        @id @default(uuid()) @db.Uuid
-  organizationId        String        @db.Uuid
-  branchId              String?       @db.Uuid
-  customerId            String?       @db.Uuid
+  id                    String             @id @default(uuid()) @db.Uuid
+  organizationId        String             @db.Uuid
+  branchId              String?            @db.Uuid
+  customerId            String?            @db.Uuid
   receiptNumber         String
-  registerId            String?       @db.Uuid
-  shiftId               String?       @db.Uuid
-  warehouseId           String?       @db.Uuid
-  cashierId             String?       @db.Uuid
-  status                PosSaleStatus @default(COMPLETED)
+  registerId            String?            @db.Uuid
+  shiftId               String?            @db.Uuid
+  warehouseId           String?            @db.Uuid
+  cashierId             String?            @db.Uuid
+  status                PosSaleStatus      @default(COMPLETED)
   idempotencyKey        String?
-  receiptToken          String        @unique @default(uuid()) @db.Uuid
-  discountApprovedBy    String?       @db.Uuid
-  currency              String        @default("NGN") @db.Char(3)
-  subtotal              Decimal       @db.Decimal(19, 4)
-  discountTotal         Decimal       @default(0) @db.Decimal(19, 4)
-  taxTotal              Decimal       @default(0) @db.Decimal(19, 4)
-  total                 Decimal       @db.Decimal(19, 4)
-  paidAmount            Decimal       @default(0) @db.Decimal(19, 4)
-  changeAmount          Decimal       @default(0) @db.Decimal(19, 4)
-  customerSignature     String?       @db.Text
-  salesManagerSignature String?       @db.Text
-  createdAt             DateTime      @default(now())
-  organization          Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  customer              Customer?     @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  receiptToken          String             @unique @default(uuid()) @db.Uuid
+  discountApprovedBy    String?            @db.Uuid
+  currency              String             @default("NGN") @db.Char(3)
+  subtotal              Decimal            @db.Decimal(19, 4)
+  discountTotal         Decimal            @default(0) @db.Decimal(19, 4)
+  taxTotal              Decimal            @default(0) @db.Decimal(19, 4)
+  total                 Decimal            @db.Decimal(19, 4)
+  paidAmount            Decimal            @default(0) @db.Decimal(19, 4)
+  changeAmount          Decimal            @default(0) @db.Decimal(19, 4)
+  customerSignature     String?            @db.Text
+  salesManagerSignature String?            @db.Text
+  createdAt             DateTime           @default(now())
+  organization          Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  customer              Customer?          @relation(fields: [customerId], references: [id], onDelete: Restrict)
   items                 PosSaleItem[]
   payments              PosPayment[]
   returns               PosReturn[]
-  register              PosRegister?  @relation(fields: [registerId], references: [id], onDelete: Restrict)
-  shift                 PosShift?     @relation(fields: [shiftId], references: [id], onDelete: Restrict)
-  warehouse             Warehouse?    @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  creditPayments        PosCreditPayment[]
+  register              PosRegister?       @relation(fields: [registerId], references: [id], onDelete: Restrict)
+  shift                 PosShift?          @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+  warehouse             Warehouse?         @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
 
   @@unique([organizationId, receiptNumber])
   @@unique([organizationId, idempotencyKey])
@@ -546,6 +549,28 @@ model PosPayment {
   amount    Decimal          @db.Decimal(19, 4)
   reference String?
   sale      PosSale          @relation(fields: [saleId], references: [id], onDelete: Cascade)
+}
+
+model PosCreditPayment {
+  id             String           @id @default(uuid()) @db.Uuid
+  organizationId String           @db.Uuid
+  saleId         String           @db.Uuid
+  customerId     String           @db.Uuid
+  receivedById   String?          @db.Uuid
+  reference      String           @db.VarChar(128)
+  amount         Decimal          @db.Decimal(19, 4)
+  currency       String           @db.Char(3)
+  method         PosPaymentMethod
+  paymentDate    DateTime         @db.Date
+  createdAt      DateTime         @default(now())
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sale           PosSale          @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  customer       Customer         @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  receivedBy     User?            @relation("PosCreditPaymentReceiver", fields: [receivedById], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, reference])
+  @@index([organizationId, customerId, paymentDate])
+  @@index([saleId, paymentDate])
 }
 
 model PosRegister {
@@ -841,6 +866,7 @@ model Customer {
   posSales                PosSale[]
   creditLimitAdjustments  CustomerCreditLimitAdjustment[]
   creditOverrideApprovals CustomerCreditOverrideApproval[]
+  posCreditPayments       PosCreditPayment[]
 
   @@unique([organizationId, email])
   @@index([organizationId, displayName])

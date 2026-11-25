@@ -50,6 +50,7 @@ export async function customerCreditExposure(
       select: {
         payments: { where: { method: 'CREDIT', status: 'APPROVED' }, select: { amount: true } },
         returns: { select: { creditAmount: true } },
+        creditPayments: { select: { amount: true } },
       },
     }),
   ]);
@@ -72,7 +73,11 @@ export async function customerCreditExposure(
       (value, returned) => value.add(returned.creditAmount),
       new Prisma.Decimal(0),
     );
-    return sum.add(Prisma.Decimal.max(new Prisma.Decimal(0), credit.sub(creditReturned)));
+    const settled = sale.creditPayments.reduce(
+      (value, payment) => value.add(payment.amount),
+      new Prisma.Decimal(0),
+    );
+    return sum.add(Prisma.Decimal.max(new Prisma.Decimal(0), credit.sub(creditReturned).sub(settled)));
   }, new Prisma.Decimal(0));
   return Prisma.Decimal.max(new Prisma.Decimal(0), invoicedExposure).add(posExposure);
 }

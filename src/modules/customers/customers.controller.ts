@@ -64,6 +64,12 @@ export class CustomersController {
   ) {
     return this.customers.creditOverrideHistory(u.organizationId, id);
   }
+  @Get(':id/pos-credit-payments') posCreditPaymentHistory(
+    @CurrentUser() u: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.customers.posCreditPaymentHistory(u.organizationId, id);
+  }
   @Get(':id/purchase-history') purchaseHistory(
     @CurrentUser() u: AuthUser,
     @Param('id', ParseUUIDPipe) id: string,

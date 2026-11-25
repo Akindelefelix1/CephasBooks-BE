@@ -1,15 +1,17 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../database/prisma.service.ts';
 import { assertBranch } from '../../common/branch-scope.ts';
 import { customerCreditExposure, lockCustomerCredit, requireCreditOverride } from '../customers/customer-credit.ts';
-import type { UpdatePosReceiptSignaturesDto } from './dto/pos.dto.ts';
+import type { RecordPosCreditPaymentDto, UpdatePosReceiptSignaturesDto } from './dto/pos.dto.ts';
 import { postAutomaticJournal } from '../../common/automatic-accounting.ts';
 import { MailService } from '../mail/mail.service.ts';
 
@@ -116,6 +118,7 @@ export class PosService {
           payments: true,
           customer: true,
           returns: true,
+          creditPayments: { orderBy: { paymentDate: 'desc' } },
         },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
@@ -151,6 +154,7 @@ export class PosService {
         payments: true,
         customer: true,
         returns: true,
+        creditPayments: { orderBy: { paymentDate: 'desc' } },
       },
     });
     if (!sale) throw new NotFoundException('Sale receipt not found');
@@ -945,6 +949,87 @@ export class PosService {
     });
   }
 
+  async recordCreditPayment(org: string, actorId: string, saleId: string, data: RecordPosCreditPaymentDto) {
+    return this.db.$transaction(async (tx) => {
+      const initial = await tx.posSale.findFirst({
+        where: { id: saleId, organizationId: org, status: 'COMPLETED' },
+        select: { customerId: true },
+      });
+      if (!initial) throw new NotFoundException('Completed sale not found');
+      if (!initial.customerId) throw new BadRequestException('This sale has no customer credit balance');
+      await lockCustomerCredit(tx, org, initial.customerId);
+      const sale = await tx.posSale.findFirst({
+        where: { id: saleId, organizationId: org, status: 'COMPLETED' },
+        include: { payments: true, returns: true, creditPayments: true },
+      });
+      if (!sale || sale.customerId !== initial.customerId)
+        throw new NotFoundException('Completed sale not found');
+      const reference = data.reference?.trim() ||
+        `POS-PAY-${sale.receiptNumber}-${randomUUID().slice(0, 8).toUpperCase()}`;
+      const paymentDate = new Date(data.paymentDate);
+      const priorPayment = await tx.posCreditPayment.findFirst({
+        where: { organizationId: org, reference },
+      });
+      if (priorPayment) {
+        const samePayment = priorPayment.saleId === saleId &&
+          priorPayment.amount.eq(new Prisma.Decimal(data.amount)) &&
+          priorPayment.method === data.method &&
+          priorPayment.paymentDate.toISOString().slice(0, 10) === paymentDate.toISOString().slice(0, 10);
+        if (samePayment) return priorPayment;
+        throw new ConflictException('This payment reference has already been used for a different transaction');
+      }
+      const creditSold = sale.payments
+        .filter((payment) => payment.method === 'CREDIT' && payment.status === 'APPROVED')
+        .reduce((sum, payment) => sum.add(payment.amount), new Prisma.Decimal(0));
+      const creditReturned = sale.returns.reduce(
+        (sum, returned) => sum.add(returned.creditAmount), new Prisma.Decimal(0),
+      );
+      const alreadySettled = sale.creditPayments.reduce(
+        (sum, payment) => sum.add(payment.amount), new Prisma.Decimal(0),
+      );
+      const outstanding = Prisma.Decimal.max(
+        new Prisma.Decimal(0), creditSold.sub(creditReturned).sub(alreadySettled),
+      );
+      const amount = new Prisma.Decimal(data.amount);
+      if (amount.gt(outstanding))
+        throw new BadRequestException(`Payment exceeds the POS credit balance of ${outstanding.toString()} ${sale.currency}`);
+      const payment = await tx.posCreditPayment.create({
+        data: {
+          organizationId: org,
+          saleId,
+          customerId: sale.customerId,
+          receivedById: actorId,
+          reference,
+          amount,
+          currency: sale.currency,
+          method: data.method,
+          paymentDate,
+        },
+      });
+      await postAutomaticJournal(tx, {
+        organizationId: org,
+        number: `AUTO-POS-CREDIT-PAY-${payment.id}`,
+        journalDate: payment.paymentDate,
+        description: `POS customer credit payment ${payment.reference}`,
+        lines: [
+          { accountCode: '1000', debit: amount, credit: 0, memo: payment.method },
+          { accountCode: '1100', debit: 0, credit: amount, memo: `Settle POS ${sale.receiptNumber}` },
+        ],
+      });
+      await tx.posAuditLog.create({
+        data: {
+          organizationId: org,
+          actorId,
+          action: 'POS_CREDIT_PAYMENT_RECORDED',
+          entityType: 'PosCreditPayment',
+          entityId: payment.id,
+          metadata: { saleId, receiptNumber: sale.receiptNumber, amount: amount.toString(), reference },
+        },
+      });
+      return payment;
+    });
+  }
+
   private asObject(value: Prisma.JsonValue | undefined): Prisma.JsonObject {
     return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   }
@@ -1058,23 +1143,30 @@ export class PosService {
   async voidSale(org: string, actorId: string, role: string, saleId: string, reason: string) {
     return this.db.$transaction(async (tx) => {
       const accessibleBranches = role === 'OWNER' ? [] : await this.branches(org, actorId, role);
+      const saleWhere = {
+        id: saleId,
+        organizationId: org,
+        status: 'COMPLETED' as const,
+        ...(role === 'OWNER'
+          ? {}
+          : {
+              OR: [
+                { cashierId: actorId },
+                { branchId: { in: accessibleBranches.map((branch) => String(branch.id)) } },
+              ],
+            }),
+      };
+      const candidate = await tx.posSale.findFirst({ where: saleWhere, select: { customerId: true } });
+      if (!candidate) throw new NotFoundException('Completed sale not found');
+      if (candidate.customerId) await lockCustomerCredit(tx, org, candidate.customerId);
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`pos-return:${org}:${saleId}`}))`;
       const sale = await tx.posSale.findFirst({
-        where: {
-          id: saleId,
-          organizationId: org,
-          status: 'COMPLETED',
-          ...(role === 'OWNER'
-            ? {}
-            : {
-                OR: [
-                  { cashierId: actorId },
-                  { branchId: { in: accessibleBranches.map((branch) => String(branch.id)) } },
-                ],
-              }),
-        },
-        include: { items: { include: { product: true } }, returns: true },
+        where: saleWhere,
+        include: { items: { include: { product: true } }, returns: true, creditPayments: true },
       });
       if (!sale || !sale.warehouseId) throw new NotFoundException('Completed sale not found');
+      if (sale.creditPayments.length)
+        throw new BadRequestException('This sale has recorded customer credit payments. Reverse or refund those payments before voiding the sale');
       if (sale.returns.length)
         throw new BadRequestException('Use returns for a sale with returned items');
       const journals = await tx.journal.findMany({
@@ -1231,6 +1323,7 @@ export class PosService {
           },
           returns: true,
           payments: true,
+          creditPayments: true,
         },
       });
       if (!sale || !sale.warehouseId) throw new NotFoundException('Completed sale not found');
@@ -1250,9 +1343,13 @@ export class PosService {
         (sum, returnedItem) => sum.add(returnedItem.creditAmount),
         new Prisma.Decimal(0),
       );
+      const creditAlreadySettled = sale.creditPayments.reduce(
+        (sum, creditPayment) => sum.add(creditPayment.amount),
+        new Prisma.Decimal(0),
+      );
       const creditAmount = Prisma.Decimal.min(
         amount,
-        Prisma.Decimal.max(new Prisma.Decimal(0), originalCredit.sub(creditAlreadyReturned)),
+        Prisma.Decimal.max(new Prisma.Decimal(0), originalCredit.sub(creditAlreadyReturned).sub(creditAlreadySettled)),
       );
       const cashRefund = amount.sub(creditAmount);
       const returnedBase = amount.div(new Prisma.Decimal(1).add(item.taxRate.div(100)));

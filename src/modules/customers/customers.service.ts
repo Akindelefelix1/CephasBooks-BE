@@ -96,6 +96,17 @@ export class CustomersService {
       orderBy: { createdAt: 'desc' },
     });
   }
+  async posCreditPaymentHistory(organizationId: string, id: string) {
+    await this.get(organizationId, id);
+    return this.prisma.posCreditPayment.findMany({
+      where: { organizationId, customerId: id },
+      include: {
+        sale: { select: { id: true, receiptNumber: true } },
+        receivedBy: { select: { firstName: true, lastName: true, email: true } },
+      },
+      orderBy: [{ paymentDate: 'desc' }, { createdAt: 'desc' }],
+    });
+  }
   async update(organizationId: string, id: string, actorId: string, dto: UpdateCustomerDto) {
     const { creditLimitReason, creditLimit, ...customerData } = dto;
     return this.prisma.$transaction(async (tx) => {
