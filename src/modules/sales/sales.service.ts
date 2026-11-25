@@ -523,7 +523,12 @@ export class SalesService {
         status: { in: ['SENT', 'PARTIALLY_PAID', 'OVERDUE'] },
         ...dueDate,
         ...(q.search
-          ? { customer: { displayName: { contains: q.search, mode: 'insensitive' } } }
+          ? {
+              OR: [
+                { number: { contains: q.search, mode: 'insensitive' as const } },
+                { customer: { displayName: { contains: q.search, mode: 'insensitive' as const } } },
+              ],
+            }
           : {}),
       },
       include: { customer: true },
