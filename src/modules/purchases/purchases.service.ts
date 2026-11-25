@@ -540,7 +540,13 @@ export class PurchasesService {
   async createBill(org: string, d: BillDto) {
     await assertBranch(this.db, org, d.branchId);
     const supplier = await this.supplier(org, d.supplierId);
-    const dueDate = addPaymentTermDays(d.issueDate, supplier.paymentTermsDays);
+    if (d.dueDate && d.dueDate.slice(0, 10) < d.issueDate.slice(0, 10))
+      throw new BadRequestException('Due date cannot be before issue date');
+    // Preserve the due-date preview stored in an offline bill queue. API callers
+    // that omit it still use the supplier's current payment terms.
+    const dueDate = d.dueDate
+      ? new Date(d.dueDate)
+      : addPaymentTermDays(d.issueDate, supplier.paymentTermsDays);
     if (d.purchaseOrderId) {
       const o = await this.db.purchaseOrder.findFirst({
         where: {

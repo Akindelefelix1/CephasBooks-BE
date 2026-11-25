@@ -68,7 +68,13 @@ export class InvoicesService {
     if (!customer) throw new BadRequestException('Customer does not belong to this organization');
     if (dto.projectId && !(await this.prisma.project.findFirst({ where: { id: dto.projectId, organizationId } })))
       throw new BadRequestException('Project does not belong to this organization');
-    const dueDate = addPaymentTermDays(dto.issueDate, customer.paymentTermsDays);
+    if (dto.dueDate && dto.dueDate.slice(0, 10) < dto.issueDate.slice(0, 10))
+      throw new BadRequestException('Due date cannot be before issue date');
+    // Keep the submitted due-date snapshot stable for offline-created invoices;
+    // callers that omit it still get the customer terms calculated here.
+    const dueDate = dto.dueDate
+      ? new Date(dto.dueDate)
+      : addPaymentTermDays(dto.issueDate, customer.paymentTermsDays);
     const items = dto.items.map((item) => {
       const base = new Prisma.Decimal(item.quantity).mul(item.unitPrice);
       const tax = base.mul(item.taxRate).div(100);
@@ -233,7 +239,10 @@ export class InvoicesService {
         new Prisma.Decimal(0),
         entry.total.sub(entry.paidAmount).sub(entry.creditedAmount),
       );
-      const statementStatus = entry.id === invoice.id && entry.status === 'DRAFT' ? 'SENT' : entry.status;
+      const effectiveStatus = entry.id === invoice.id && entry.status === 'DRAFT' ? 'SENT' : entry.status;
+      const dueDate = entry.dueDate.toISOString().slice(0, 10);
+      const today = new Date().toISOString().slice(0, 10);
+      const statementStatus = balance.greaterThan(0) && dueDate < today ? 'OVERDUE' : effectiveStatus;
       return `<tr><td>${escapeHtml(entry.number)}</td><td>${entry.issueDate.toLocaleDateString('en-NG')}</td><td>${entry.dueDate.toLocaleDateString('en-NG')}</td><td>${escapeHtml(statementStatus)}</td><td align="right">${money.format(Number(entry.total))}</td><td align="right">${money.format(Number(entry.paidAmount))}</td><td align="right">${money.format(Number(entry.creditedAmount))}</td><td align="right">${money.format(Number(balance))}</td></tr>`;
     }).join('');
     const outstanding = statementInvoices.reduce(
