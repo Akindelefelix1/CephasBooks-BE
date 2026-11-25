@@ -284,6 +284,7 @@ model Organization {
   ledgerAccounts            LedgerAccount[]
   journals                  Journal[]
   financeRecords            FinanceRecord[]
+  assetDepreciationEntries  AssetDepreciationEntry[]
   products                  Product[]
   productCategories         ProductCategory[]
   warehouses                Warehouse[]
@@ -1315,39 +1316,61 @@ model LedgerAccount {
 }
 
 model Journal {
-  id                String        @id @default(uuid()) @db.Uuid
-  organizationId    String        @db.Uuid
+  id                String                  @id @default(uuid()) @db.Uuid
+  organizationId    String                  @db.Uuid
   number            String
-  journalDate       DateTime      @db.Date
+  journalDate       DateTime                @db.Date
   description       String
-  status            JournalStatus @default(DRAFT)
+  status            JournalStatus           @default(DRAFT)
   lines             Json
-  total             Decimal       @db.Decimal(19, 4)
-  reversedJournalId String?       @db.Uuid
+  total             Decimal                 @db.Decimal(19, 4)
+  reversedJournalId String?                 @db.Uuid
   postedAt          DateTime?
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
-  organization      Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  organization      Organization            @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  depreciationEntry AssetDepreciationEntry?
 
   @@unique([organizationId, number])
   @@index([organizationId, status, journalDate])
 }
 
 model FinanceRecord {
-  id             String            @id @default(uuid()) @db.Uuid
-  organizationId String            @db.Uuid
-  kind           FinanceRecordKind
-  reference      String
-  name           String
-  startDate      DateTime          @db.Date
-  endDate        DateTime?         @db.Date
-  amount         Decimal           @db.Decimal(19, 4)
-  status         String
-  data           Json              @default("{}")
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
-  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  id                  String                   @id @default(uuid()) @db.Uuid
+  organizationId      String                   @db.Uuid
+  kind                FinanceRecordKind
+  reference           String
+  name                String
+  startDate           DateTime                 @db.Date
+  endDate             DateTime?                @db.Date
+  amount              Decimal                  @db.Decimal(19, 4)
+  status              String
+  data                Json                     @default("{}")
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+  organization        Organization             @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  depreciationEntries AssetDepreciationEntry[]
 
   @@unique([organizationId, kind, reference])
   @@index([organizationId, kind, status])
+}
+
+model AssetDepreciationEntry {
+  id                      String        @id @default(uuid()) @db.Uuid
+  organizationId          String        @db.Uuid
+  assetId                 String        @db.Uuid
+  periodStart             DateTime      @db.Date
+  periodEnd               DateTime      @db.Date
+  amount                  Decimal       @db.Decimal(19, 4)
+  accumulatedDepreciation Decimal       @db.Decimal(19, 4)
+  carryingAmount          Decimal       @db.Decimal(19, 4)
+  status                  String        @default("POSTED")
+  journalId               String?       @unique @db.Uuid
+  createdAt               DateTime      @default(now())
+  organization            Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  asset                   FinanceRecord @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  journal                 Journal?      @relation(fields: [journalId], references: [id], onDelete: SetNull)
+
+  @@unique([assetId, periodEnd])
+  @@index([organizationId, periodEnd, status])
 }

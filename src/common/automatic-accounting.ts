@@ -6,6 +6,7 @@ const systemAccounts: Record<string, { name: string; type: LedgerAccountType }> 
   '1100': { name: 'Accounts receivable', type: 'ASSET' },
   '1150': { name: 'Tax receivable', type: 'ASSET' },
   '1200': { name: 'Fixed assets', type: 'ASSET' },
+  '1250': { name: 'Accumulated depreciation', type: 'ASSET' },
   '1300': { name: 'Inventory', type: 'ASSET' },
   '2000': { name: 'Accounts payable', type: 'LIABILITY' },
   '2100': { name: 'Tax payable', type: 'LIABILITY' },
@@ -18,6 +19,7 @@ const systemAccounts: Record<string, { name: string; type: LedgerAccountType }> 
   '5200': { name: 'Payroll expense', type: 'EXPENSE' },
   '5300': { name: 'Cost of goods sold', type: 'EXPENSE' },
   '5400': { name: 'Fixed asset disposal loss', type: 'EXPENSE' },
+  '5500': { name: 'Depreciation expense', type: 'EXPENSE' },
   '5900': { name: 'Inventory adjustment loss', type: 'EXPENSE' },
   '9999': { name: 'Uncategorized bank transactions', type: 'LIABILITY' },
 };

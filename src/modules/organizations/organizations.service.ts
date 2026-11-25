@@ -183,6 +183,7 @@ export class OrganizationsService {
       await tx.bankTransaction.deleteMany({ where: { organizationId } });
       await tx.bankAccount.deleteMany({ where: { organizationId } });
       await tx.ledgerAccount.deleteMany({ where: { organizationId } });
+      await tx.assetDepreciationEntry.deleteMany({ where: { organizationId } });
       await tx.journal.deleteMany({ where: { organizationId } });
       await tx.financeRecord.deleteMany({ where: { organizationId } });
       await tx.project.deleteMany({ where: { organizationId } });

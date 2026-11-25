@@ -15,7 +15,7 @@ import { FinanceRecordKind, Role } from '@prisma/client';
 import { CurrentUser, type AuthUser } from '../../common/decorators/current-user.decorator.ts';
 import { Roles } from '../../common/decorators/roles.decorator.ts';
 import { RolesGuard } from '../../common/guards/roles.guard.ts';
-import { AccountDto, FinanceRecordDto, JournalDto, StatusDto } from './dto/accounting.dto.ts';
+import { AccountDto, AssetDepreciationSettingsDto, FinanceRecordDto, JournalDto, RunAssetDepreciationDto, StatusDto } from './dto/accounting.dto.ts';
 import { AccountingService } from './accounting.service.ts';
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 @Controller('accounting')
@@ -69,6 +69,28 @@ export class AccountingController {
     @Query() q: Record<string, string>,
   ) {
     return this.s.records(u.organizationId, kind, q);
+  }
+  @Get('assets/:id/depreciation') assetDepreciation(
+    @CurrentUser() u: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.s.assetDepreciation(u.organizationId, id);
+  }
+  @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT)
+  @Patch('assets/:id/depreciation/settings') updateAssetDepreciationSettings(
+    @CurrentUser() u: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() d: AssetDepreciationSettingsDto,
+  ) {
+    return this.s.updateAssetDepreciationSettings(u.organizationId, id, d);
+  }
+  @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT)
+  @Post('assets/:id/depreciation') runAssetDepreciation(
+    @CurrentUser() u: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() d: RunAssetDepreciationDto,
+  ) {
+    return this.s.runAssetDepreciation(u.organizationId, id, d.throughDate);
   }
   @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT) @Post('records') createRecord(
     @CurrentUser() u: AuthUser,

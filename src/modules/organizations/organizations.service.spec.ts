@@ -277,6 +277,7 @@ describe('OrganizationsService account deletion', () => {
       'bankTransaction',
       'bankAccount',
       'ledgerAccount',
+      'assetDepreciationEntry',
       'journal',
       'financeRecord',
       'project',

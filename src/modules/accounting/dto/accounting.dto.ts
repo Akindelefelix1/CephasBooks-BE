@@ -4,12 +4,16 @@ import {
   IsArray,
   IsDateString,
   IsEnum,
+  IsIn,
+  IsInt,
+  IsNotEmpty,
   IsNumber,
   IsObject,
   IsOptional,
   IsString,
   IsUUID,
   MaxLength,
+  Max,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -38,8 +42,8 @@ export class JournalDto {
 }
 export class FinanceRecordDto {
   @IsEnum(FinanceRecordKind) kind!: FinanceRecordKind;
-  @IsString() reference!: string;
-  @IsString() name!: string;
+  @IsString() @IsNotEmpty() @MaxLength(100) reference!: string;
+  @IsString() @IsNotEmpty() @MaxLength(200) name!: string;
   @IsDateString() startDate!: string;
   @IsOptional() @IsDateString() endDate?: string;
   @Type(() => Number) @IsNumber() @Min(0) amount!: number;
@@ -48,4 +52,16 @@ export class FinanceRecordDto {
 }
 export class StatusDto {
   @IsString() status!: string;
+}
+
+export class AssetDepreciationSettingsDto {
+  @Type(() => Number) @IsNumber() @Min(0) residualValue!: number;
+  @Type(() => Number) @IsInt() @Min(1) @Max(100) usefulLifeYears!: number;
+  @IsIn(['STRAIGHT_LINE', 'REDUCING_BALANCE']) method!: 'STRAIGHT_LINE' | 'REDUCING_BALANCE';
+  @IsIn(['MONTHLY', 'QUARTERLY', 'ANNUALLY']) frequency!: 'MONTHLY' | 'QUARTERLY' | 'ANNUALLY';
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0.01) @Max(100) reducingBalanceRate?: number;
+}
+
+export class RunAssetDepreciationDto {
+  @IsOptional() @IsDateString() throughDate?: string;
 }

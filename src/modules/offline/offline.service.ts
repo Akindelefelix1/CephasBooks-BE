@@ -274,6 +274,13 @@ export class OfflineService {
       }));
     }
 
+    if (can('accounting.view')) {
+      const assetRecords = resources['/accounting/records/ASSET?search='] as Array<{ id: string }> | undefined;
+      await Promise.all((assetRecords ?? []).map((asset) =>
+        load('accounting.view', `/accounting/assets/${asset.id}/depreciation`, () => accounting.assetDepreciation(org, asset.id)),
+      ));
+    }
+
     return {
       version: 1,
       exportedAt: new Date().toISOString(),
