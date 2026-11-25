@@ -222,7 +222,13 @@ export class OrganizationsService {
         countryCode: organization.countryCode,
         updatedAt: organization.updatedAt,
       },
-      settings: this.asObject(root.admin as Prisma.JsonValue),
+      settings: {
+        ...this.asObject(root.admin as Prisma.JsonValue),
+        preferences: {
+          ...this.asObject(this.asObject(root.admin as Prisma.JsonValue).preferences as Prisma.JsonValue),
+          ...this.asObject(root.financial as Prisma.JsonValue),
+        },
+      },
     };
   }
 
@@ -272,6 +278,7 @@ export class OrganizationsService {
       });
       const root = this.asObject(organization.onboardingData);
       const admin = this.asObject(root.admin as Prisma.JsonValue);
+      const previousPreferences = this.asObject(admin.preferences as Prisma.JsonValue);
       const updated = await tx.organization.update({
         where: { id: actor.organizationId },
         data: {
@@ -280,7 +287,15 @@ export class OrganizationsService {
             : {}),
           onboardingData: {
             ...root,
-            admin: { ...admin, [section]: data },
+            ...(section === 'preferences'
+              ? { financial: { ...this.asObject(root.financial as Prisma.JsonValue), ...data } }
+              : section === 'currencies' && typeof data.defaultCurrency === 'string'
+                ? { financial: { ...this.asObject(root.financial as Prisma.JsonValue), baseCurrency: data.defaultCurrency } }
+              : {}),
+            admin: {
+              ...admin,
+              [section]: section === 'preferences' ? { ...previousPreferences, ...data } : data,
+            },
           } as Prisma.InputJsonObject,
         },
         select: { updatedAt: true },
@@ -929,7 +944,8 @@ export class OrganizationsService {
     const items = data.items;
     if (section === 'branches' || section === 'currencies' || section === 'integrations') {
       if (!Array.isArray(items)) throw new BadRequestException('Settings items must be an array');
-      if (items.length > 100) throw new BadRequestException('A maximum of 100 items is supported');
+      if (section !== 'currencies' && items.length > 100)
+        throw new BadRequestException('A maximum of 100 items is supported');
     }
     if (section === 'currencies' && Array.isArray(items)) {
       const currencies = items.map((item) => item as Record<string, unknown>);
@@ -956,6 +972,17 @@ export class OrganizationsService {
         throw new BadRequestException('The default currency must be selected and active');
       if (Number(selectedDefault.rate) !== 1)
         throw new BadRequestException('The default currency exchange rate must be 1');
+    }
+    if (section === 'preferences') {
+      if (data.fiscalYearStart !== undefined &&
+        !['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].includes(String(data.fiscalYearStart)))
+        throw new BadRequestException('Fiscal year must start in a valid calendar month');
+      if (data.timezone !== undefined) {
+        if (typeof data.timezone !== 'string' || data.timezone.length > 80)
+          throw new BadRequestException('Select a valid reporting time zone');
+        try { new Intl.DateTimeFormat('en-US', { timeZone: data.timezone }); }
+        catch { throw new BadRequestException('Select a valid IANA reporting time zone'); }
+      }
     }
     if (section === 'branches' && Array.isArray(items)) {
       const branches = items.map((item) => item as Record<string, unknown>);

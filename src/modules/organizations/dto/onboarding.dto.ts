@@ -9,6 +9,7 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  IsTimeZone,
   MaxLength,
 } from 'class-validator';
 
@@ -30,11 +31,11 @@ export class BusinessProfileDto {
 
 export class FinancialSettingsDto {
   @ApiProperty() @IsISO4217CurrencyCode() baseCurrency!: string;
-  @ApiProperty() @IsIn(['January', 'April', 'July', 'October']) fiscalYearStart!: string;
+  @ApiProperty() @IsIn(['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']) fiscalYearStart!: string;
   @ApiProperty() @IsIn(['Accrual basis', 'Cash basis']) accountingMethod!: string;
   @ApiProperty() @IsIn(['Due on receipt', 'Net 15', 'Net 30', 'Net 60']) paymentTerms!: string;
   @ApiProperty() @IsIn(['Weighted average', 'FIFO']) inventoryValuation!: string;
-  @ApiProperty() @IsString() @IsNotEmpty() @MaxLength(80) timezone!: string;
+  @ApiProperty() @IsTimeZone() @MaxLength(80) timezone!: string;
 }
 
 export class OrganizationStructureDto {

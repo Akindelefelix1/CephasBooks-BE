@@ -15,6 +15,33 @@ import type { RecordPosCreditPaymentDto, UpdatePosReceiptSignaturesDto } from '.
 import { postAutomaticJournal } from '../../common/automatic-accounting.ts';
 import { MailService } from '../mail/mail.service.ts';
 
+function localDayStartUtc(date: string, timeZone: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!match) return new Date(date);
+  const target = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  let guess = target;
+  const formatter = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  });
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const parts = formatter.formatToParts(new Date(guess));
+    const value = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? 0);
+    const represented = Date.UTC(value('year'), value('month') - 1, value('day'), value('hour'), value('minute'), value('second'));
+    const difference = target - represented;
+    guess += difference;
+    if (difference === 0) break;
+  }
+  return new Date(guess);
+}
+
+function addCalendarDay(date: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!match) return date;
+  return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + 1)).toISOString().slice(0, 10);
+}
+
 export function assertSaleQuantity(
   product: { name?: string; allowFractionalSale: boolean },
   rawQuantity: number | Prisma.Decimal,
@@ -73,8 +100,30 @@ export class PosService {
   ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
-    const endDate = query.to ? new Date(query.to) : undefined;
-    if (endDate && /^\d{4}-\d{2}-\d{2}$/.test(query.to!)) endDate.setDate(endDate.getDate() + 1);
+    let reportingTimeZone = 'Africa/Lagos';
+    if ((query.from && /^\d{4}-\d{2}-\d{2}$/.test(query.from)) || (query.to && /^\d{4}-\d{2}-\d{2}$/.test(query.to))) {
+      const organization = await this.db.organization.findUnique({
+        where: { id: org }, select: { onboardingData: true },
+      });
+      const root = organization?.onboardingData && typeof organization.onboardingData === 'object' && !Array.isArray(organization.onboardingData)
+        ? organization.onboardingData as Record<string, unknown> : {};
+      const financial = root.financial && typeof root.financial === 'object' && !Array.isArray(root.financial)
+        ? root.financial as Record<string, unknown> : {};
+      const admin = root.admin && typeof root.admin === 'object' && !Array.isArray(root.admin)
+        ? root.admin as Record<string, unknown> : {};
+      const preferences = admin.preferences && typeof admin.preferences === 'object' && !Array.isArray(admin.preferences)
+        ? admin.preferences as Record<string, unknown> : {};
+      const configuredZone = financial.timezone ?? preferences.timezone;
+      if (typeof configuredZone === 'string') {
+        try { new Intl.DateTimeFormat('en-US', { timeZone: configuredZone }); reportingTimeZone = configuredZone; } catch { /* Keep the safe default. */ }
+      }
+    }
+    const fromDate = query.from
+      ? /^\d{4}-\d{2}-\d{2}$/.test(query.from) ? localDayStartUtc(query.from, reportingTimeZone) : new Date(query.from)
+      : undefined;
+    const endDate = query.to
+      ? /^\d{4}-\d{2}-\d{2}$/.test(query.to) ? localDayStartUtc(addCalendarDay(query.to), reportingTimeZone) : new Date(query.to)
+      : undefined;
     const accessibleBranches =
       staffId && role !== 'OWNER' ? await this.branches(org, staffId, role) : [];
     const restrictions: Prisma.PosSaleWhereInput[] = [];
@@ -104,7 +153,7 @@ export class PosService {
       ...(query.from || query.to
         ? {
             createdAt: {
-              ...(query.from ? { gte: new Date(query.from) } : {}),
+              ...(fromDate ? { gte: fromDate } : {}),
               ...(endDate ? { lt: endDate } : {}),
             },
           }
