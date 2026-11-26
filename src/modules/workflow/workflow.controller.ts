@@ -38,6 +38,9 @@ export class WorkflowController {
   @Get('notifications/push/config') pushConfig() {
     return this.push.configuration();
   }
+  @Get('notifications/summary') notificationsSummary(@CurrentUser() u: AuthUser) {
+    return this.service.notificationsSummary(u.organizationId, u.sub);
+  }
   @Post('notifications/push-subscriptions') subscribePush(
     @CurrentUser() u: AuthUser,
     @Body() body: Record<string, any>,

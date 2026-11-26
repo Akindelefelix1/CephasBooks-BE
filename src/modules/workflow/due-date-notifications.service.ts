@@ -1,9 +1,12 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
-import webpush from 'web-push';
+import { createRequire } from 'node:module';
 import { MailService } from '../mail/mail.service.ts';
 import { PrismaService } from '../../database/prisma.service.ts';
+
+const require = createRequire(import.meta.url);
+const webpush = require('web-push') as typeof import('web-push');
 
 type Reminder = {
   organizationId: string;

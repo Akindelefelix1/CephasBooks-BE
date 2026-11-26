@@ -212,6 +212,17 @@ export class WorkflowService {
     });
     return items.map(({ receipts, ...item }) => ({ ...item, isRead: receipts.length > 0 }));
   }
+  async notificationsSummary(org: string, userId: string) {
+    const notificationScope = await this.notificationScope(org, userId);
+    const unreadNotifications = await this.db.appNotification.count({
+      where: {
+        organizationId: org,
+        ...notificationScope,
+        receipts: { none: { userId } },
+      },
+    });
+    return { unreadNotifications };
+  }
   createNotification(org: string, d: NotificationDto) {
     return this.db.appNotification.create({
       data: { ...d, title: d.title.trim(), message: d.message.trim(), organizationId: org },
