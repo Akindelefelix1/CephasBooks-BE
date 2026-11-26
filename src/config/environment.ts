@@ -9,9 +9,7 @@ const schema = z.object({
   JWT_REFRESH_SECRET: z.string().min(32),
   JWT_ACCESS_TTL: z.string().default('15m'),
   JWT_REFRESH_TTL: z.string().default('7d'),
-  CORS_ORIGINS: z
-    .string()
-    .default('http://localhost:5173,https://cephas-books.onrender.com'),
+  CORS_ORIGINS: z.string().default('http://localhost:5173,https://cephas-books.onrender.com'),
   SWAGGER_ENABLED: z.enum(['true', 'false']).default('true'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   ZOHO_MAIL_API_TOKEN: z.preprocess(
@@ -27,6 +25,18 @@ const schema = z.object({
     z.string().min(3).optional(),
   ),
   FRONTEND_URL: z.string().url().default('https://cephas-books.onrender.com'),
+  VAPID_PUBLIC_KEY: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.string().min(1).optional(),
+  ),
+  VAPID_PRIVATE_KEY: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.string().min(1).optional(),
+  ),
+  VAPID_SUBJECT: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.string().min(1).optional(),
+  ),
 });
 
 export type Environment = z.infer<typeof schema>;

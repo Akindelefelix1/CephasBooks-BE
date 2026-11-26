@@ -230,6 +230,8 @@ model User {
   sessions                   Session[]
   auditLogs                  AuditLog[]
   notificationReceipts       NotificationReceipt[]
+  receivedNotifications      AppNotification[]                @relation("NotificationRecipient")
+  pushSubscriptions          PushSubscription[]
   bankTransactionReversals   BankTransaction[]                @relation("BankTransactionReversedBy")
   assignedPosRegisters       PosRegister[]                    @relation("PosRegisterAssignedStaff")
   cashierPosShifts           PosShift[]                       @relation("PosShiftCashier")
@@ -256,6 +258,7 @@ model Organization {
   deletionCodeSentAt        DateTime?
   deletionCodeAttempts      Int                              @default(0)
   memberships               Membership[]
+  pushSubscriptions         PushSubscription[]
   customRoles               CustomRole[]
   customers                 Customer[]
   customerCreditAdjustments CustomerCreditLimitAdjustment[]
@@ -367,19 +370,45 @@ model ApprovalRequest {
 }
 
 model AppNotification {
-  id             String                @id @default(uuid()) @db.Uuid
-  organizationId String                @db.Uuid
-  title          String
-  message        String
-  category       NotificationCategory  @default(SYSTEM)
-  relatedType    String?
-  relatedId      String?
-  isRead         Boolean               @default(false)
-  createdAt      DateTime              @default(now())
-  organization   Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  receipts       NotificationReceipt[]
+  id               String                @id @default(uuid()) @db.Uuid
+  organizationId   String                @db.Uuid
+  title            String
+  message          String
+  category         NotificationCategory  @default(SYSTEM)
+  relatedType      String?
+  relatedId        String?
+  isRead           Boolean               @default(false)
+  createdAt        DateTime              @default(now())
+  organization     Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  receipts         NotificationReceipt[]
+  recipientId      String?               @db.Uuid
+  recipient        User?                 @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  dedupeKey        String?               @unique
+  emailSentAt      DateTime?
+  emailAttemptedAt DateTime?
+  emailLastError   String?
+  pushSentAt       DateTime?
+  pushAttemptedAt  DateTime?
+  pushLastError    String?
 
   @@index([organizationId, isRead, createdAt])
+  @@index([recipientId, createdAt])
+}
+
+model PushSubscription {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  userId         String       @db.Uuid
+  endpoint       String       @unique
+  p256dh         String
+  auth           String
+  userAgent      String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, userId])
 }
 
 model NotificationReceipt {

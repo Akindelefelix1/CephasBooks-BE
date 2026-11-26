@@ -26,11 +26,30 @@ import {
   WorkflowStatusDto,
 } from './dto/workflow.dto.ts';
 import { WorkflowService } from './workflow.service.ts';
+import { PushSubscriptionsService } from './push-subscriptions.service.ts';
 
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 @Controller('workflow')
 export class WorkflowController {
-  constructor(private readonly service: WorkflowService) {}
+  constructor(
+    private readonly service: WorkflowService,
+    private readonly push: PushSubscriptionsService,
+  ) {}
+  @Get('notifications/push/config') pushConfig() {
+    return this.push.configuration();
+  }
+  @Post('notifications/push-subscriptions') subscribePush(
+    @CurrentUser() u: AuthUser,
+    @Body() body: Record<string, any>,
+  ) {
+    return this.push.subscribe(u.organizationId, u.sub, body);
+  }
+  @Delete('notifications/push-subscriptions') unsubscribePush(
+    @CurrentUser() u: AuthUser,
+    @Body() body: { endpoint?: string },
+  ) {
+    return this.push.unsubscribe(u.sub, body.endpoint || '');
+  }
   @Get('summary') summary(@CurrentUser() u: AuthUser) {
     return this.service.summary(u.organizationId, u.sub);
   }

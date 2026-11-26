@@ -13,12 +13,13 @@ import type {
 export class WorkflowService {
   constructor(private readonly db: PrismaService) {}
   async summary(org: string, userId: string) {
+    const notificationScope = await this.notificationScope(org, userId);
     const [documents, pendingApprovals, unreadNotifications, activeRules, runs, failures] =
       await Promise.all([
         this.db.documentRecord.count({ where: { organizationId: org, status: 'ACTIVE' } }),
         this.db.approvalRequest.count({ where: { organizationId: org, status: 'PENDING' } }),
         this.db.appNotification.count({
-          where: { organizationId: org, receipts: { none: { userId } } },
+          where: { organizationId: org, ...notificationScope, receipts: { none: { userId } } },
         }),
         this.db.workflowRule.count({ where: { organizationId: org, status: 'ACTIVE' } }),
         this.db.workflowRule.aggregate({
@@ -197,9 +198,11 @@ export class WorkflowService {
     return updated;
   }
   async notifications(org: string, userId: string, q: Record<string, string>) {
+    const notificationScope = await this.notificationScope(org, userId);
     const items = await this.db.appNotification.findMany({
       where: {
         organizationId: org,
+        ...notificationScope,
         ...(q.category ? { category: q.category as never } : {}),
         ...(q.unread === 'true' ? { receipts: { none: { userId } } } : {}),
       },
@@ -215,7 +218,10 @@ export class WorkflowService {
     });
   }
   async read(org: string, userId: string, id: string, isRead: boolean) {
-    const item = await this.db.appNotification.findFirst({ where: { id, organizationId: org } });
+    const notificationScope = await this.notificationScope(org, userId);
+    const item = await this.db.appNotification.findFirst({
+      where: { id, organizationId: org, ...notificationScope },
+    });
     if (!item) throw new NotFoundException('Notification not found');
     if (isRead)
       await this.db.notificationReceipt.upsert({
@@ -227,8 +233,13 @@ export class WorkflowService {
     return { ...item, isRead };
   }
   async readAll(org: string, userId: string) {
+    const notificationScope = await this.notificationScope(org, userId);
     const unread = await this.db.appNotification.findMany({
-      where: { organizationId: org, receipts: { none: { userId } } },
+      where: {
+        organizationId: org,
+        ...notificationScope,
+        receipts: { none: { userId } },
+      },
       select: { id: true },
     });
     if (unread.length)
@@ -237,6 +248,33 @@ export class WorkflowService {
         skipDuplicates: true,
       });
     return { updated: unread.length };
+  }
+  private async notificationScope(org: string, userId: string) {
+    const membership = await this.db.membership.findUnique({
+      where: { userId_organizationId: { userId, organizationId: org } },
+      select: { role: true, customRole: { select: { permissions: true } } },
+    });
+    const permissions = Array.isArray(membership?.customRole?.permissions)
+      ? (membership.customRole.permissions as string[])
+      : [];
+    const allowedTypes: string[] = [];
+    if (
+      !membership?.customRole &&
+      ['OWNER', 'ADMIN', 'ACCOUNTANT'].includes(membership?.role || '')
+    )
+      allowedTypes.push('INVOICE', 'BILL');
+    else {
+      if (permissions.includes('sales.view')) allowedTypes.push('INVOICE');
+      if (permissions.includes('purchases.view')) allowedTypes.push('BILL');
+    }
+    return {
+      OR: [
+        { recipientId: null },
+        ...(allowedTypes.length
+          ? [{ recipientId: userId, relatedType: { in: allowedTypes } }]
+          : []),
+      ],
+    };
   }
   rules(org: string, q: Record<string, string>) {
     return this.db.workflowRule.findMany({

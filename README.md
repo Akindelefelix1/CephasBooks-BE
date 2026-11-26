@@ -37,3 +37,13 @@ npm audit --audit-level=high
 ```
 
 Before production, terminate TLS at a trusted proxy, use a managed secrets store, restrict Swagger, add Redis-backed distributed rate limiting, configure backups/PITR, centralize immutable audit logs, add email verification/password reset/MFA, and commission security and accounting-control reviews.
+
+## Due date reminder delivery
+
+The API creates recipient-scoped reminders for outstanding invoices and approved supplier bills. It sends in-app reminders and uses the configured email provider. Browser and installed-PWA device alerts use Web Push and require these backend environment variables:
+
+- `VAPID_PUBLIC_KEY`
+- `VAPID_PRIVATE_KEY`
+- `VAPID_SUBJECT` (for example, `mailto:support@cephasbooks.com`)
+
+Generate a key pair with `npx web-push generate-vapid-keys` and add the values to the backend host's secret environment settings. Keep the private key out of source control. If VAPID is not configured or the browser does not support Push, in-app and email reminders continue to work.
