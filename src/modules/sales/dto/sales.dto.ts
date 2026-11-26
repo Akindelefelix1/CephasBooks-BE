@@ -6,6 +6,7 @@ import {
   ArrayMinSize,
   IsBoolean,
   IsDateString,
+  IsInt,
   IsEnum,
   IsNumber,
   IsOptional,
@@ -14,6 +15,7 @@ import {
   IsISO4217CurrencyCode,
   MaxLength,
   Min,
+  Max,
   ValidateNested,
 } from 'class-validator';
 export class SalesLineDto {
@@ -21,7 +23,10 @@ export class SalesLineDto {
   @ApiProperty() @IsString() description!: string;
   @ApiProperty() @Type(() => Number) @IsNumber() @Min(0.0001) quantity!: number;
   @ApiProperty() @Type(() => Number) @IsNumber() @Min(0) unitPrice!: number;
-  @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsNumber() @Min(0) taxRate = 0;
+  @ApiPropertyOptional() @IsOptional() @IsUUID() taxRateId?: string;
+  @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() @Min(1) taxRateVersion?: number;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(100) taxName?: string;
+  @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsNumber({ maxDecimalPlaces: 4 }) @Min(0) @Max(100) taxRate = 0;
 }
 export class CreateQuotationDto {
   @IsOptional() @IsUUID() branchId?: string;

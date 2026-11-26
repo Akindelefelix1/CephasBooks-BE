@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS "AssetDepreciationEntry_assetId_periodEnd_key";

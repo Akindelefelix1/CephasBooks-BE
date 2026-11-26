@@ -199,6 +199,7 @@ export class OfflineService {
       loadAny(['inventory.view', 'sales.view'], '/operations/products?', () => operations.products(org, {})),
       load('inventory.view', '/operations/products-page?', () => operations.productsPage(org, {})),
       load('inventory.view', '/operations/product-categories', () => operations.categories(org)),
+      loadAny(['inventory.view', 'sales.view'], '/operations/tax-rates', () => operations.taxRates(org)),
       loadAny(['inventory.view', 'sales.view'], '/operations/warehouses?', () => operations.warehouses(org, {})),
       load('inventory.view', '/operations/movements?', () => operations.movements(org, {})),
       load('inventory.view', '/operations/adjustments?', () => operations.adjustments(org, {})),

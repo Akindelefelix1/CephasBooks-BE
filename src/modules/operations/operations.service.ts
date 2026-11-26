@@ -11,6 +11,7 @@ import type {
   ProjectDto,
   ProjectPlanDto,
   RestockDto,
+  TaxRateDto,
   TransferDto,
   WarehouseDto,
 } from './dto/operations.dto.ts';
@@ -168,6 +169,7 @@ export class OperationsService {
         ...(q.category ? { category: { equals: q.category, mode: 'insensitive' } } : {}),
       },
       orderBy: { createdAt: 'desc' },
+      include: { taxRateSetting: { select: { id: true, name: true, rate: true, version: true, isActive: true } } },
     });
     const ids = products.map((x) => x.id);
     const movements = ids.length
@@ -183,6 +185,9 @@ export class OperationsService {
     const stock = this.stockMap(movements);
     const valuedProducts = products.map((product) => ({
       ...product,
+      taxRate: product.taxRateSetting?.rate ?? product.taxRate,
+      taxRateVersion: product.taxRateSetting?.version ?? null,
+      taxRateName: product.taxRateSetting?.name ?? (Number(product.taxRate) > 0 ? 'Custom tax' : 'No tax'),
       stockQuantity: stock.get(product.id) ?? new Prisma.Decimal(0),
       stockValue: (stock.get(product.id) ?? new Prisma.Decimal(0)).mul(product.salePrice),
     }));
@@ -327,6 +332,60 @@ export class OperationsService {
     });
   }
 
+  taxRates(org: string, includeInactive = false) {
+    return this.db.taxRate.findMany({
+      where: { organizationId: org, ...(includeInactive ? {} : { isActive: true }) },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async createTaxRate(org: string, dto: TaxRateDto, actor: AuthUser) {
+    const name = dto.name.trim();
+    if (!name) throw new BadRequestException('Tax rate name is required');
+    try {
+      return await this.db.$transaction(async (tx) => {
+        const row = await tx.taxRate.create({ data: { organizationId: org, name, rate: dto.rate, description: dto.description?.trim() || null } });
+        await tx.auditLog.create({ data: { organizationId: org, actorId: actor.sub, action: 'CREATE', entityType: 'TaxRate', entityId: row.id, metadata: { name, rate: dto.rate } } });
+        return row;
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new BadRequestException('A tax rate with this name already exists');
+      throw error;
+    }
+  }
+
+  async updateTaxRate(org: string, id: string, dto: TaxRateDto, actor: AuthUser) {
+    const name = dto.name.trim();
+    if (!name) throw new BadRequestException('Tax rate name is required');
+    try {
+      return await this.db.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "TaxRate" WHERE "id" = ${id}::uuid AND "organizationId" = ${org}::uuid FOR UPDATE`;
+        const current = await tx.taxRate.findFirst({ where: { id, organizationId: org } });
+        if (!current) throw new NotFoundException('Tax rate not found');
+        await tx.taxRateRevision.create({ data: { taxRateId: id, version: current.version, name: current.name, rate: current.rate } });
+        const updated = await tx.taxRate.update({ where: { id }, data: { name, rate: dto.rate, description: dto.description?.trim() || null, version: { increment: 1 } } });
+        await tx.auditLog.create({ data: { organizationId: org, actorId: actor.sub, action: 'UPDATE', entityType: 'TaxRate', entityId: id, metadata: { previous: { name: current.name, rate: current.rate.toString(), description: current.description, version: current.version }, next: { name, rate: dto.rate, description: dto.description?.trim() || null, version: updated.version } } } });
+        return updated;
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new BadRequestException('A tax rate with this name already exists');
+      throw error;
+    }
+  }
+
+  async taxRateStatus(org: string, id: string, isActive: boolean, actor: AuthUser) {
+    return this.db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "TaxRate" WHERE "id" = ${id}::uuid AND "organizationId" = ${org}::uuid FOR UPDATE`;
+      const rate = await tx.taxRate.findFirst({ where: { id, organizationId: org } });
+      if (!rate) throw new NotFoundException('Tax rate not found');
+      if (!isActive && await tx.product.count({ where: { organizationId: org, taxRateId: id } }))
+        throw new BadRequestException('Reassign this tax rate from its products and services before archiving it');
+      const updated = await tx.taxRate.update({ where: { id }, data: { isActive } });
+      await tx.auditLog.create({ data: { organizationId: org, actorId: actor.sub, action: isActive ? 'ACTIVATE' : 'ARCHIVE', entityType: 'TaxRate', entityId: id, metadata: { name: rate.name, rate: rate.rate.toString() } } });
+      return updated;
+    });
+  }
+
   async createProduct(org: string, d: ProductDto, actor?: AuthUser) {
     const {
       openingQuantity = 0,
@@ -365,8 +424,17 @@ export class OperationsService {
         });
         if (!warehouse) throw new BadRequestException('Opening-stock warehouse is unavailable');
       }
+      let taxRate = new Prisma.Decimal(productData.taxRate ?? 0);
+      let taxRateId: string | null = null;
+      if (productData.taxRateId) {
+        await tx.$queryRaw`SELECT "id" FROM "TaxRate" WHERE "id" = ${productData.taxRateId}::uuid AND "organizationId" = ${org}::uuid FOR UPDATE`;
+        const selectedTaxRate = await tx.taxRate.findFirst({ where: { id: productData.taxRateId, organizationId: org, isActive: true } });
+        if (!selectedTaxRate) throw new BadRequestException('Select an active tax rate belonging to this organization');
+        taxRate = selectedTaxRate.rate;
+        taxRateId = selectedTaxRate.id;
+      }
       const product = await tx.product.create({
-        data: { ...productData, defaultWarehouseId: stockWarehouseId, organizationId: org },
+        data: { ...productData, taxRate, taxRateId, defaultWarehouseId: stockWarehouseId, organizationId: org },
       });
       if (actor)
         await tx.auditLog.create({
@@ -442,9 +510,18 @@ export class OperationsService {
         );
     }
     return this.db.$transaction(async (tx) => {
+      let taxRate = new Prisma.Decimal(productData.taxRate ?? 0);
+      let taxRateId: string | null = null;
+      if (productData.taxRateId) {
+        await tx.$queryRaw`SELECT "id" FROM "TaxRate" WHERE "id" = ${productData.taxRateId}::uuid AND "organizationId" = ${org}::uuid FOR UPDATE`;
+        const selectedTaxRate = await tx.taxRate.findFirst({ where: { id: productData.taxRateId, organizationId: org, isActive: true } });
+        if (!selectedTaxRate) throw new BadRequestException('Select an active tax rate belonging to this organization');
+        taxRate = selectedTaxRate.rate;
+        taxRateId = selectedTaxRate.id;
+      }
       const updated = await tx.product.update({
         where: { id },
-        data: { ...productData, defaultWarehouseId: defaultWarehouseId || null },
+        data: { ...productData, taxRate, taxRateId, defaultWarehouseId: defaultWarehouseId || null },
       });
       if (availableQuantity !== undefined && updated.type === 'PRODUCT' && defaultWarehouseId) {
         const rows = await tx.stockMovement.findMany({
@@ -1095,9 +1172,10 @@ export class OperationsService {
   private async product(org: string, id: string, active = false) {
     const x = await this.db.product.findFirst({
       where: { id, organizationId: org, ...(active ? { isActive: true } : {}) },
+      include: { taxRateSetting: { select: { id: true, name: true, rate: true, version: true, isActive: true } } },
     });
     if (!x) throw new NotFoundException('Product not found');
-    return x;
+    return { ...x, taxRate: x.taxRateSetting?.rate ?? x.taxRate, taxRateVersion: x.taxRateSetting?.version ?? null, taxRateName: x.taxRateSetting?.name ?? (Number(x.taxRate) > 0 ? 'Custom tax' : 'No tax') };
   }
   private async warehouse(org: string, id: string, active = false) {
     const x = await this.db.warehouse.findFirst({

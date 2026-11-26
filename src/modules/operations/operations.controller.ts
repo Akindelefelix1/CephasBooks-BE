@@ -26,6 +26,7 @@ import {
   ProjectPlanDto,
   ProjectStatusDto,
   RestockDto,
+  TaxRateDto,
   TransferDto,
   WarehouseDto,
 } from './dto/operations.dto.ts';
@@ -58,6 +59,29 @@ export class OperationsController {
   }
   @Get('product-categories') categories(@CurrentUser() u: AuthUser) {
     return this.operations.categories(u.organizationId);
+  }
+  @Get('tax-rates') taxRates(@CurrentUser() u: AuthUser, @Query('includeInactive') includeInactive?: string) {
+    return this.operations.taxRates(u.organizationId, includeInactive === 'true');
+  }
+  @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT) @Post('tax-rates') createTaxRate(
+    @CurrentUser() u: AuthUser,
+    @Body() d: TaxRateDto,
+  ) {
+    return this.operations.createTaxRate(u.organizationId, d, u);
+  }
+  @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT) @Patch('tax-rates/:id') updateTaxRate(
+    @CurrentUser() u: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() d: TaxRateDto,
+  ) {
+    return this.operations.updateTaxRate(u.organizationId, id, d, u);
+  }
+  @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT) @Patch('tax-rates/:id/status') taxRateStatus(
+    @CurrentUser() u: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() d: ActiveStatusDto,
+  ) {
+    return this.operations.taxRateStatus(u.organizationId, id, d.isActive, u);
   }
   @Roles(Role.OWNER, Role.ADMIN, Role.ACCOUNTANT) @Post('product-categories') createCategory(
     @CurrentUser() u: AuthUser,

@@ -11,6 +11,7 @@ import {
   IsUUID,
   Matches,
   MaxLength,
+  Max,
   Min,
 } from 'class-validator';
 import { AdjustmentStatus, ItemType, ProjectStatus, StockMovementType } from '@prisma/client';
@@ -28,13 +29,20 @@ export class ProductDto {
   unit = 'unit';
   @Type(() => Number) @IsNumber() @Min(0) salePrice!: number;
   @Type(() => Number) @IsNumber() @Min(0) costPrice!: number;
-  @Type(() => Number) @IsNumber() @Min(0) taxRate!: number;
+  @IsOptional() @IsUUID() taxRateId?: string;
+  @Type(() => Number) @IsNumber({ maxDecimalPlaces: 4 }) @Min(0) @Max(100) taxRate = 0;
   @Type(() => Number) @IsNumber() @Min(0) reorderLevel!: number;
   @IsOptional() @IsBoolean() allowFractionalSale = false;
   @IsOptional() @IsUUID() defaultWarehouseId?: string;
   @IsOptional() @Type(() => Number) @IsNumber() @Min(0) openingQuantity?: number;
   @IsOptional() @Type(() => Number) @IsNumber() @Min(0) availableQuantity?: number;
   @IsOptional() @IsUUID() openingWarehouseId?: string;
+}
+
+export class TaxRateDto {
+  @IsString() @IsNotEmpty() @MaxLength(100) name!: string;
+  @Type(() => Number) @IsNumber({ maxDecimalPlaces: 4 }) @Min(0) @Max(100) rate!: number;
+  @IsOptional() @IsString() @MaxLength(500) description?: string;
 }
 
 export class ProductCategoryDto {

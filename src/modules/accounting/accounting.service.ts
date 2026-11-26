@@ -135,21 +135,28 @@ export class AccountingService {
     });
   }
   async reverseJournal(org: string, id: string) {
-    const j = await this.db.journal.findFirst({ where: { id, organizationId: org } });
-    if (!j) throw new NotFoundException('Journal not found');
-    if (j.status !== 'POSTED')
-      throw new BadRequestException('Only posted journals can be reversed');
-    const lines = (j.lines as unknown as JournalLineDto[]).map((x) => ({
-      ...x,
-      debit: x.credit,
-      credit: x.debit,
-    }));
     return this.db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "Journal" WHERE "id" = ${id}::uuid AND "organizationId" = ${org}::uuid FOR UPDATE`;
+      const j = await tx.journal.findFirst({ where: { id, organizationId: org } });
+      if (!j) throw new NotFoundException('Journal not found');
+      if (j.status !== 'POSTED')
+        throw new BadRequestException('Only posted journals can be reversed');
+      const lines = (j.lines as unknown as JournalLineDto[]).map((x) => ({
+        ...x,
+        debit: x.credit,
+        credit: x.debit,
+      }));
       const depreciationEntry = await tx.assetDepreciationEntry.findFirst({
         where: { organizationId: org, journalId: id, status: 'POSTED' },
       });
-      if (depreciationEntry)
+      if (depreciationEntry) {
         await tx.$queryRaw`SELECT "id" FROM "FinanceRecord" WHERE "id" = ${depreciationEntry.assetId}::uuid AND "organizationId" = ${org}::uuid FOR UPDATE`;
+        const laterPosted = await tx.assetDepreciationEntry.count({
+          where: { organizationId: org, assetId: depreciationEntry.assetId, status: 'POSTED', periodEnd: { gt: depreciationEntry.periodEnd } },
+        });
+        if (laterPosted)
+          throw new BadRequestException('Reverse later depreciation periods first to preserve the asset schedule order');
+      }
       const reversal = await tx.journal.create({
         data: {
           organizationId: org,
@@ -373,7 +380,7 @@ export class AccountingService {
   async assetDepreciation(org: string, id: string) {
     const [asset, entries, today] = await Promise.all([
       this.findAsset(org, id),
-      this.db.assetDepreciationEntry.findMany({ where: { organizationId: org, assetId: id }, include: { journal: { select: { id: true, number: true, status: true } } }, orderBy: { periodEnd: 'asc' } }),
+      this.db.assetDepreciationEntry.findMany({ where: { organizationId: org, assetId: id }, include: { journal: { select: { id: true, number: true, status: true } } }, orderBy: [{ periodEnd: 'asc' }, { createdAt: 'asc' }] }),
       this.businessToday(org),
     ]);
     const settings = this.depreciationSettings(asset);
@@ -418,12 +425,9 @@ export class AccountingService {
       if (asset.status !== 'ACTIVE') throw new BadRequestException('Activate the fixed asset before generating depreciation');
       const settings = this.depreciationSettings(asset);
       if (!settings) throw new BadRequestException('Complete the asset depreciation settings before generating depreciation');
-      const history = await tx.assetDepreciationEntry.findMany({ where: { organizationId: org, assetId: id }, orderBy: { periodEnd: 'asc' } });
+      const history = await tx.assetDepreciationEntry.findMany({ where: { organizationId: org, assetId: id }, orderBy: [{ periodEnd: 'asc' }, { createdAt: 'asc' }] });
       const schedule = this.schedule(asset, settings, history, cutoff);
-      const next = schedule.find((period) => period.status === 'DUE');
-      const reversedPeriod = schedule.find((period) => period.status === 'REVERSED');
-      if (reversedPeriod && (!next || reversedPeriod.period < next.period))
-        throw new BadRequestException('A depreciation journal was reversed for an earlier period. Resolve the reversal before generating later periods.');
+      const next = schedule.find((period) => period.status === 'DUE' || period.status === 'REVERSED');
       if (!next) throw new BadRequestException('There is no unrecorded depreciation period due by the selected date');
       const cost = new Prisma.Decimal(asset.amount);
       const accumulated = history.filter((entry) => entry.status === 'POSTED').reduce((sum, entry) => sum.add(entry.amount), new Prisma.Decimal(0));
@@ -448,9 +452,15 @@ export class AccountingService {
       const newAccumulated = accumulated.add(amount);
       const carrying = Prisma.Decimal.max(residual, cost.sub(newAccumulated));
       const periodNumber = `${next.periodEnd.replaceAll('-', '')}`;
+      const baseJournalNumber = `DEPR-${asset.reference}-${periodNumber}`;
+      const samePeriodEntries = history.filter((entry) => isoDate(entry.periodEnd) === next.periodEnd);
+      const priorPeriodEntry = samePeriodEntries[samePeriodEntries.length - 1];
+      const journalNumber = priorPeriodEntry?.status === 'REVERSED'
+        ? `${baseJournalNumber}-R${await tx.journal.count({ where: { organizationId: org, number: { startsWith: baseJournalNumber } } })}`
+        : baseJournalNumber;
       const journal = await postAutomaticJournal(tx, {
         organizationId: org,
-        number: `DEPR-${asset.reference}-${periodNumber}`,
+        number: journalNumber,
         journalDate: fromIsoDate(next.periodEnd),
         description: `Depreciation ${asset.reference} — ${next.periodStart} to ${next.periodEnd}`,
         lines: [
@@ -468,6 +478,7 @@ export class AccountingService {
           accumulatedDepreciation: newAccumulated,
           carryingAmount: carrying,
           journalId: journal.id,
+          status: 'POSTED',
         },
       });
       await tx.financeRecord.update({

@@ -23,6 +23,8 @@ export class PosLineDto {
   @IsUUID() productId!: string;
   @Type(() => Number) @IsNumber() @Min(0.0001) quantity!: number;
   @IsOptional() @Type(() => Number) @IsNumber() @Min(0) discount?: number;
+  @IsOptional() @IsUUID() taxRateId?: string;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) taxRateVersion?: number;
 }
 export class PosPaymentDto {
   @IsEnum(PosPaymentMethod) method!: PosPaymentMethod;

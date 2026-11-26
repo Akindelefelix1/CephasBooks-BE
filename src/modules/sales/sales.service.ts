@@ -25,9 +25,43 @@ export class SalesService {
     );
     const total = items.reduce((s, x) => {
       const base = new Prisma.Decimal(x.quantity).mul(x.unitPrice);
-      return s.add(base.add(base.mul(x.taxRate ?? 0).div(100)));
+      return s.add(base.add(base.mul(x.taxRate ?? 0).div(100).toDecimalPlaces(4, Prisma.Decimal.ROUND_HALF_UP)));
     }, new Prisma.Decimal(0));
     return { subtotal, taxTotal: total.sub(subtotal), total };
+  }
+  private async taxSnapshots(org: string, items: CreateQuotationDto['items']) {
+    const ids = [...new Set(items.flatMap((item) => item.taxRateId ? [item.taxRateId] : []))];
+    const rates = ids.length
+      ? await this.prisma.taxRate.findMany({ where: { organizationId: org, id: { in: ids } } })
+      : [];
+    const byId = new Map(rates.map((rate) => [rate.id, rate]));
+    const revisions = ids.length
+      ? await this.prisma.taxRateRevision.findMany({ where: { taxRateId: { in: ids } } })
+      : [];
+    const revisionByVersion = new Map(revisions.map((revision) => [`${revision.taxRateId}:${revision.version}`, revision]));
+    return items.map((item) => {
+      const configured = item.taxRateId ? byId.get(item.taxRateId) : undefined;
+      if (item.taxRateId && !configured)
+        throw new BadRequestException('Selected tax rate does not belong to this organization');
+      const snapshot = item.taxRateVersion === undefined || !configured
+        ? configured
+        : configured.version === item.taxRateVersion
+          ? configured
+          : revisionByVersion.get(`${configured.id}:${item.taxRateVersion}`);
+      if (item.taxRateId && item.taxRateVersion !== undefined && !snapshot)
+        throw new BadRequestException('The selected tax rate version is no longer available. Refresh the tax selection and try again.');
+      const rate = snapshot?.rate ?? new Prisma.Decimal(item.taxRate ?? 0);
+      const amount = new Prisma.Decimal(item.quantity).mul(item.unitPrice).mul(rate).div(100)
+        .toDecimalPlaces(4, Prisma.Decimal.ROUND_HALF_UP);
+      return {
+        ...item,
+        taxRate: rate.toNumber(),
+        taxRateId: configured?.id ?? null,
+        taxRateVersion: snapshot?.version ?? item.taxRateVersion ?? null,
+        taxName: snapshot?.name || item.taxName?.trim() || (rate.gt(0) ? 'Custom tax' : 'No tax'),
+        taxAmount: amount.toNumber(),
+      };
+    });
   }
   private filter(org: string, q: Record<string, string>) {
     return {
@@ -128,6 +162,7 @@ export class SalesService {
     const { number: _number, sendEmail, ...quotationData } = d;
     void _number;
     const number = (await this.nextQuotationNumber(org)).number;
+    const items = await this.taxSnapshots(org, d.items);
     const quotation = await this.prisma.quotation.create({
       data: {
         ...quotationData,
@@ -137,8 +172,8 @@ export class SalesService {
         organizationId: org,
         issueDate: new Date(d.issueDate),
         expiryDate: new Date(d.expiryDate),
-        items: d.items as unknown as Prisma.InputJsonValue,
-        ...this.totals(d.items),
+        items: items as unknown as Prisma.InputJsonValue,
+        ...this.totals(items),
       },
       include: { customer: true },
     });
@@ -162,6 +197,7 @@ export class SalesService {
     const { number: _number, sendEmail: _sendEmail, ...quotationData } = d;
     void _number;
     void _sendEmail;
+    const items = await this.taxSnapshots(org, d.items);
     return this.prisma.quotation.update({
       where: { id },
       data: {
@@ -169,8 +205,8 @@ export class SalesService {
         number: row.number,
         issueDate: new Date(d.issueDate),
         expiryDate: new Date(d.expiryDate),
-        items: d.items as unknown as Prisma.InputJsonValue,
-        ...this.totals(d.items),
+        items: items as unknown as Prisma.InputJsonValue,
+        ...this.totals(items),
       },
       include: { customer: true },
     });
@@ -202,6 +238,8 @@ export class SalesService {
       quantity: number;
       unitPrice: number;
       taxRate?: number;
+      taxName?: string;
+      taxAmount?: number;
     }>;
     const money = new Intl.NumberFormat('en-NG', {
       style: 'currency',
@@ -210,14 +248,15 @@ export class SalesService {
     const rows = items
       .map((item) => {
         const amount = Number(item.quantity) * Number(item.unitPrice);
-        const total = amount + amount * ((item.taxRate ?? 0) / 100);
-        return `<tr><td>${escapeHtml(item.name)}</td><td>${escapeHtml(item.description)}</td><td align="center">${Number(item.quantity)}</td><td align="right">${money.format(Number(item.unitPrice))}</td><td align="right">${money.format(total)}</td></tr>`;
+        const tax = Number(item.taxAmount ?? amount * ((item.taxRate ?? 0) / 100));
+        const total = amount + tax;
+        return `<tr><td>${escapeHtml(item.name)}</td><td>${escapeHtml(item.description)}</td><td align="center">${Number(item.quantity)}</td><td align="right">${money.format(Number(item.unitPrice))}</td><td>${escapeHtml(item.taxName ?? 'Tax')} (${Number(item.taxRate ?? 0)}%)</td><td align="right">${money.format(tax)}</td><td align="right">${money.format(total)}</td></tr>`;
       })
       .join('');
     await this.mail?.send({
       to: quotation.customer.email,
       subject: `Quotation ${quotation.number} from ${quotation.organization.name}`,
-      html: `<main style="max-width:680px;margin:auto;padding:32px;font-family:Arial,sans-serif;color:#20242c;border-top:8px solid #ff8500"><h1>Quotation</h1><p>${escapeHtml(quotation.organization.name)}</p><p><strong>Quotation no.</strong> ${escapeHtml(quotation.number)}<br><strong>Date:</strong> ${quotation.issueDate.toLocaleDateString('en-NG')}<br><strong>Valid until:</strong> ${quotation.expiryDate.toLocaleDateString('en-NG')}</p><p><strong>Prepared for:</strong> ${escapeHtml(quotation.customer.displayName)}</p><table width="100%" cellspacing="0" cellpadding="10" style="border-collapse:collapse"><thead><tr><th align="left">Item</th><th align="left">Details</th><th>Qty</th><th align="right">Rate</th><th align="right">Amount</th></tr></thead><tbody>${rows}</tbody></table><p style="text-align:right;font-size:18px"><strong>Total: ${money.format(Number(quotation.total))}</strong></p>${quotation.notes ? `<section><strong>Terms &amp; Conditions</strong><p>${escapeHtml(quotation.notes).replace(/\n/g, '<br>')}</p></section>` : ''}</main>`,
+      html: `<main style="max-width:680px;margin:auto;padding:32px;font-family:Arial,sans-serif;color:#20242c;border-top:8px solid #ff8500"><h1>Quotation</h1><p>${escapeHtml(quotation.organization.name)}</p><p><strong>Quotation no.</strong> ${escapeHtml(quotation.number)}<br><strong>Date:</strong> ${quotation.issueDate.toLocaleDateString('en-NG')}<br><strong>Valid until:</strong> ${quotation.expiryDate.toLocaleDateString('en-NG')}</p><p><strong>Prepared for:</strong> ${escapeHtml(quotation.customer.displayName)}</p><table width="100%" cellspacing="0" cellpadding="10" style="border-collapse:collapse"><thead><tr><th align="left">Item</th><th align="left">Details</th><th>Qty</th><th align="right">Rate</th><th>Tax</th><th align="right">Tax amount</th><th align="right">Amount</th></tr></thead><tbody>${rows}</tbody></table><p style="text-align:right">Subtotal: ${money.format(Number(quotation.subtotal))}<br>Tax: ${money.format(Number(quotation.taxTotal))}</p><p style="text-align:right;font-size:18px"><strong>Total: ${money.format(Number(quotation.total))}</strong></p>${quotation.notes ? `<section><strong>Terms &amp; Conditions</strong><p>${escapeHtml(quotation.notes).replace(/\n/g, '<br>')}</p></section>` : ''}</main>`,
     });
     if (quotation.status === 'DRAFT')
       await this.prisma.quotation.update({ where: { id }, data: { status: 'SENT' } });
@@ -237,6 +276,10 @@ export class SalesService {
       quantity: number;
       unitPrice: number;
       taxRate: number;
+      taxRateId?: string | null;
+      taxRateVersion?: number | null;
+      taxName?: string;
+      taxAmount?: number;
     }>;
     const invoiceNumber = await this.nextInvoiceNumber(org);
     return this.prisma.$transaction(async (tx) => {
@@ -260,7 +303,10 @@ export class SalesService {
               return {
                 ...x,
                 name: x.name || x.description,
-                lineTotal: base.add(base.mul(x.taxRate ?? 0).div(100)),
+                taxRateId: x.taxRateId ?? null,
+                taxName: x.taxName ?? (x.taxRate > 0 ? 'Custom tax' : 'No tax'),
+                taxAmount: new Prisma.Decimal(x.taxAmount ?? base.mul(x.taxRate ?? 0).div(100).toDecimalPlaces(4, Prisma.Decimal.ROUND_HALF_UP)),
+                lineTotal: base.add(new Prisma.Decimal(x.taxAmount ?? base.mul(x.taxRate ?? 0).div(100).toDecimalPlaces(4, Prisma.Decimal.ROUND_HALF_UP))),
               };
             }),
           },

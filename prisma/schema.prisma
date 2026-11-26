@@ -286,6 +286,7 @@ model Organization {
   financeRecords            FinanceRecord[]
   assetDepreciationEntries  AssetDepreciationEntry[]
   products                  Product[]
+  taxRates                  TaxRate[]
   productCategories         ProductCategory[]
   warehouses                Warehouse[]
   branches                  Branch[]
@@ -472,12 +473,14 @@ model Product {
   salePrice           Decimal           @default(0) @db.Decimal(19, 4)
   costPrice           Decimal           @default(0) @db.Decimal(19, 4)
   taxRate             Decimal           @default(0) @db.Decimal(7, 4)
+  taxRateId           String?           @db.Uuid
   reorderLevel        Decimal           @default(0) @db.Decimal(19, 4)
   allowFractionalSale Boolean           @default(false)
   isActive            Boolean           @default(true)
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt
   organization        Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  taxRateSetting      TaxRate?          @relation("ProductTaxRate", fields: [taxRateId], references: [id], onDelete: SetNull)
   defaultWarehouse    Warehouse?        @relation("ProductDefaultWarehouse", fields: [defaultWarehouseId], references: [id], onDelete: SetNull)
   movements           StockMovement[]
   adjustments         StockAdjustment[]
@@ -486,6 +489,40 @@ model Product {
 
   @@unique([organizationId, sku])
   @@index([organizationId, type, isActive])
+  @@index([taxRateId])
+}
+
+model TaxRate {
+  id             String            @id @default(uuid()) @db.Uuid
+  organizationId String            @db.Uuid
+  name           String            @db.VarChar(100)
+  rate           Decimal           @db.Decimal(7, 4)
+  description    String?           @db.VarChar(500)
+  isActive       Boolean           @default(true)
+  version        Int               @default(1)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  products       Product[]         @relation("ProductTaxRate")
+  invoiceItems   InvoiceItem[]     @relation("InvoiceItemTaxRate")
+  posItems       PosSaleItem[]     @relation("PosItemTaxRate")
+  revisions      TaxRateRevision[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId, isActive, name])
+}
+
+model TaxRateRevision {
+  id        String   @id @default(uuid()) @db.Uuid
+  taxRateId String   @db.Uuid
+  version   Int
+  name      String   @db.VarChar(100)
+  rate      Decimal  @db.Decimal(7, 4)
+  createdAt DateTime @default(now())
+  taxRate   TaxRate  @relation(fields: [taxRateId], references: [id], onDelete: Restrict)
+
+  @@unique([taxRateId, version])
+  @@index([taxRateId, createdAt])
 }
 
 model PosSale {
@@ -529,17 +566,22 @@ model PosSale {
 }
 
 model PosSaleItem {
-  id          String  @id @default(uuid()) @db.Uuid
-  saleId      String  @db.Uuid
-  productId   String  @db.Uuid
-  description String
-  quantity    Decimal @db.Decimal(19, 4)
-  unitPrice   Decimal @db.Decimal(19, 4)
-  discount    Decimal @default(0) @db.Decimal(19, 4)
-  taxRate     Decimal @default(0) @db.Decimal(7, 4)
-  lineTotal   Decimal @db.Decimal(19, 4)
-  sale        PosSale @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  product     Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  id             String   @id @default(uuid()) @db.Uuid
+  saleId         String   @db.Uuid
+  productId      String   @db.Uuid
+  description    String
+  quantity       Decimal  @db.Decimal(19, 4)
+  unitPrice      Decimal  @db.Decimal(19, 4)
+  discount       Decimal  @default(0) @db.Decimal(19, 4)
+  taxRate        Decimal  @default(0) @db.Decimal(7, 4)
+  taxRateId      String?  @db.Uuid
+  taxRateVersion Int?
+  taxName        String   @default("Tax") @db.VarChar(100)
+  taxAmount      Decimal  @default(0) @db.Decimal(19, 4)
+  lineTotal      Decimal  @db.Decimal(19, 4)
+  sale           PosSale  @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product        Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+  taxRateSetting TaxRate? @relation("PosItemTaxRate", fields: [taxRateId], references: [id], onDelete: SetNull)
 }
 
 model PosPayment {
@@ -1020,17 +1062,23 @@ model CreditNote {
 }
 
 model InvoiceItem {
-  id          String  @id @default(uuid()) @db.Uuid
-  invoiceId   String  @db.Uuid
-  name        String  @default("")
-  description String
-  quantity    Decimal @db.Decimal(19, 4)
-  unitPrice   Decimal @db.Decimal(19, 4)
-  taxRate     Decimal @default(0) @db.Decimal(7, 4)
-  lineTotal   Decimal @db.Decimal(19, 4)
-  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  id             String   @id @default(uuid()) @db.Uuid
+  invoiceId      String   @db.Uuid
+  name           String   @default("")
+  description    String
+  quantity       Decimal  @db.Decimal(19, 4)
+  unitPrice      Decimal  @db.Decimal(19, 4)
+  taxRate        Decimal  @default(0) @db.Decimal(7, 4)
+  taxRateId      String?  @db.Uuid
+  taxRateVersion Int?
+  taxName        String   @default("Tax") @db.VarChar(100)
+  taxAmount      Decimal  @default(0) @db.Decimal(19, 4)
+  lineTotal      Decimal  @db.Decimal(19, 4)
+  invoice        Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  taxRateSetting TaxRate? @relation("InvoiceItemTaxRate", fields: [taxRateId], references: [id], onDelete: SetNull)
 
   @@index([invoiceId])
+  @@index([taxRateId])
 }
 
 model AuditLog {
@@ -1371,6 +1419,5 @@ model AssetDepreciationEntry {
   asset                   FinanceRecord @relation(fields: [assetId], references: [id], onDelete: Restrict)
   journal                 Journal?      @relation(fields: [journalId], references: [id], onDelete: SetNull)
 
-  @@unique([assetId, periodEnd])
   @@index([organizationId, periodEnd, status])
 }

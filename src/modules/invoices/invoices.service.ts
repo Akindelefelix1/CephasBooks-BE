@@ -75,10 +75,38 @@ export class InvoicesService {
     const dueDate = dto.dueDate
       ? new Date(dto.dueDate)
       : addPaymentTermDays(dto.issueDate, customer.paymentTermsDays);
+    const taxRateIds = [...new Set(dto.items.flatMap((item) => item.taxRateId ? [item.taxRateId] : []))];
+    const configuredRates = taxRateIds.length
+      ? await this.prisma.taxRate.findMany({ where: { organizationId, id: { in: taxRateIds } } })
+      : [];
+    const configuredRateById = new Map(configuredRates.map((rate) => [rate.id, rate]));
+    const revisions = taxRateIds.length
+      ? await this.prisma.taxRateRevision.findMany({ where: { taxRateId: { in: taxRateIds } } })
+      : [];
+    const revisionByVersion = new Map(revisions.map((revision) => [`${revision.taxRateId}:${revision.version}`, revision]));
     const items = dto.items.map((item) => {
+      const configured = item.taxRateId ? configuredRateById.get(item.taxRateId) : undefined;
+      if (item.taxRateId && !configured)
+        throw new BadRequestException('Selected tax rate does not belong to this organization');
+      const snapshot = item.taxRateVersion === undefined || !configured
+        ? configured
+        : configured.version === item.taxRateVersion
+          ? configured
+          : revisionByVersion.get(`${configured.id}:${item.taxRateVersion}`);
+      if (item.taxRateId && item.taxRateVersion !== undefined && !snapshot)
+        throw new BadRequestException('The selected tax rate version is no longer available. Refresh the tax selection and try again.');
+      const taxRate = snapshot?.rate ?? new Prisma.Decimal(item.taxRate ?? 0);
       const base = new Prisma.Decimal(item.quantity).mul(item.unitPrice);
-      const tax = base.mul(item.taxRate).div(100);
-      return { ...item, lineTotal: base.add(tax) };
+      const taxAmount = base.mul(taxRate).div(100).toDecimalPlaces(4, Prisma.Decimal.ROUND_HALF_UP);
+      return {
+        ...item,
+        taxRateId: configured?.id ?? null,
+        taxRateVersion: snapshot?.version ?? item.taxRateVersion ?? null,
+        taxRate,
+        taxName: snapshot?.name || item.taxName?.trim() || (taxRate.gt(0) ? 'Custom tax' : 'No tax'),
+        taxAmount,
+        lineTotal: base.add(taxAmount),
+      };
     });
     const subtotal = items.reduce(
       (sum, item) => sum.add(new Prisma.Decimal(item.quantity).mul(item.unitPrice)),
@@ -223,7 +251,7 @@ export class InvoicesService {
     const rows = invoice.items
       .map(
         (item) =>
-          `<tr><td>${escapeHtml(item.name)}</td><td>${escapeHtml(item.description)}</td><td align="center">${item.quantity.toString()}</td><td align="right">${money.format(Number(item.unitPrice))}</td><td align="right">${money.format(Number(item.lineTotal))}</td></tr>`,
+          `<tr><td>${escapeHtml(item.name)}</td><td>${escapeHtml(item.description)}</td><td align="center">${item.quantity.toString()}</td><td align="right">${money.format(Number(item.unitPrice))}</td><td>${escapeHtml(item.taxName)} (${Number(item.taxRate)}%)</td><td align="right">${money.format(Number(item.taxAmount))}</td><td align="right">${money.format(Number(item.lineTotal))}</td></tr>`,
       )
       .join('');
     const statementInvoices = await this.prisma.invoice.findMany({
@@ -260,7 +288,7 @@ export class InvoicesService {
     await this.mail?.send({
       to: invoice.customer.email!,
       subject: `Invoice ${invoice.number} and account statement from ${invoice.organization.name}`,
-      html: `<main style="max-width:900px;margin:auto;padding:32px;font-family:Arial,sans-serif;color:#20242c;border-top:8px solid #ff8500"><h1 style="margin:0">Invoice</h1><p>${escapeHtml(invoice.organization.name)}</p><p><strong>Invoice no.</strong> ${escapeHtml(invoice.number)}<br><strong>Due date:</strong> ${invoice.dueDate.toLocaleDateString('en-NG')}</p><p><strong>Bill to:</strong> ${escapeHtml(invoice.customer.displayName)}${invoice.shippingAddress ? `<br><strong>Ship to:</strong> ${escapeHtml(invoice.shippingAddress)}` : ''}</p><table width="100%" cellspacing="0" cellpadding="10" style="border-collapse:collapse;background:#fff"><thead style="background:#f3f4f6"><tr><th align="left">Product/service</th><th align="left">Description</th><th>Qty</th><th align="right">Unit price</th><th align="right">Amount</th></tr></thead><tbody>${rows}</tbody></table><p style="text-align:right">Shipping: ${money.format(Number(invoice.shippingAmount))}</p><p style="text-align:right;font-size:18px"><strong>Total: ${money.format(Number(invoice.total))}</strong></p><p>${escapeHtml(invoice.notes || 'Thank you for your business.')}</p><hr style="margin:32px 0;border:0;border-top:1px solid #ddd"><h2>Customer statement</h2><p>Account activity and outstanding balances for ${escapeHtml(invoice.customer.displayName)}.</p><div style="overflow-x:auto"><table width="100%" cellspacing="0" cellpadding="8" style="border-collapse:collapse"><thead style="background:#f3f4f6"><tr><th align="left">Invoice</th><th align="left">Date</th><th align="left">Due</th><th align="left">Status</th><th align="right">Total</th><th align="right">Paid</th><th align="right">Credits</th><th align="right">Balance</th></tr></thead><tbody>${statementRows}</tbody></table></div><p style="text-align:right;font-size:18px"><strong>Outstanding balance: ${money.format(Number(outstanding))}</strong></p><h3>Payments received</h3><div style="overflow-x:auto"><table width="100%" cellspacing="0" cellpadding="8" style="border-collapse:collapse"><thead style="background:#f3f4f6"><tr><th align="left">Date</th><th align="left">Reference</th><th align="left">Invoice number</th><th align="left">Method</th><th align="right">Amount</th></tr></thead><tbody>${paymentRows || '<tr><td colspan="5">No payments recorded.</td></tr>'}</tbody></table></div></main>`,
+      html: `<main style="max-width:900px;margin:auto;padding:32px;font-family:Arial,sans-serif;color:#20242c;border-top:8px solid #ff8500"><h1 style="margin:0">Invoice</h1><p>${escapeHtml(invoice.organization.name)}</p><p><strong>Invoice no.</strong> ${escapeHtml(invoice.number)}<br><strong>Due date:</strong> ${invoice.dueDate.toLocaleDateString('en-NG')}</p><p><strong>Bill to:</strong> ${escapeHtml(invoice.customer.displayName)}${invoice.shippingAddress ? `<br><strong>Ship to:</strong> ${escapeHtml(invoice.shippingAddress)}` : ''}</p><table width="100%" cellspacing="0" cellpadding="10" style="border-collapse:collapse;background:#fff"><thead style="background:#f3f4f6"><tr><th align="left">Product/service</th><th align="left">Description</th><th>Qty</th><th align="right">Unit price</th><th>Tax</th><th align="right">Tax amount</th><th align="right">Amount</th></tr></thead><tbody>${rows}</tbody></table><p style="text-align:right">Subtotal: ${money.format(Number(invoice.subtotal))}<br>Tax: ${money.format(Number(invoice.taxTotal))}<br>Shipping: ${money.format(Number(invoice.shippingAmount))}</p><p style="text-align:right;font-size:18px"><strong>Total: ${money.format(Number(invoice.total))}</strong></p><p>${escapeHtml(invoice.notes || 'Thank you for your business.')}</p><hr style="margin:32px 0;border:0;border-top:1px solid #ddd"><h2>Customer statement</h2><p>Account activity and outstanding balances for ${escapeHtml(invoice.customer.displayName)}.</p><div style="overflow-x:auto"><table width="100%" cellspacing="0" cellpadding="8" style="border-collapse:collapse"><thead style="background:#f3f4f6"><tr><th align="left">Invoice</th><th align="left">Date</th><th align="left">Due</th><th align="left">Status</th><th align="right">Total</th><th align="right">Paid</th><th align="right">Credits</th><th align="right">Balance</th></tr></thead><tbody>${statementRows}</tbody></table></div><p style="text-align:right;font-size:18px"><strong>Outstanding balance: ${money.format(Number(outstanding))}</strong></p><h3>Payments received</h3><div style="overflow-x:auto"><table width="100%" cellspacing="0" cellpadding="8" style="border-collapse:collapse"><thead style="background:#f3f4f6"><tr><th align="left">Date</th><th align="left">Reference</th><th align="left">Invoice number</th><th align="left">Method</th><th align="right">Amount</th></tr></thead><tbody>${paymentRows || '<tr><td colspan="5">No payments recorded.</td></tr>'}</tbody></table></div></main>`,
     });
 
     return { sent: true };

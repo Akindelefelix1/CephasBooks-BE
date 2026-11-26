@@ -72,7 +72,7 @@ export function calculatePosLine(
   const base = unitPrice.mul(quantity);
   const discount = unitDiscount.mul(quantity);
   const taxable = base.sub(discount);
-  const tax = taxable.mul(product.taxRate).div(100);
+  const tax = taxable.mul(product.taxRate).div(100).toDecimalPlaces(4, Prisma.Decimal.ROUND_HALF_UP);
   return { quantity, unitDiscount, base, discount, tax, total: taxable.add(tax) };
 }
 
@@ -752,7 +752,7 @@ export class PosService {
       branchId?: string;
       idempotencyKey?: string;
       customerId?: string;
-      items: Array<{ productId: string; quantity: number; discount?: number }>;
+      items: Array<{ productId: string; quantity: number; discount?: number; taxRateId?: string; taxRateVersion?: number }>;
       payments: Array<{
         method: 'CASH' | 'CARD' | 'TRANSFER' | 'CREDIT';
         amount: number;
@@ -828,14 +828,37 @@ export class PosService {
           id: { in: data.items.map((x) => x.productId) },
           isActive: true,
         },
+        include: { taxRateSetting: { select: { id: true, name: true, rate: true, version: true, isActive: true } } },
       });
       if (products.length !== data.items.length)
         throw new BadRequestException('One or more products are unavailable');
+      const requestedTaxRateIds = [...new Set(data.items.flatMap((line) => line.taxRateId ? [line.taxRateId] : []))];
+      if (data.items.some((line) => line.taxRateVersion !== undefined && !line.taxRateId))
+        throw new BadRequestException('A tax rate version must include its tax rate reference');
+      const selectedTaxRates = requestedTaxRateIds.length
+        ? await tx.taxRate.findMany({ where: { organizationId: org, id: { in: requestedTaxRateIds } } })
+        : [];
+      const selectedTaxRateById = new Map(selectedTaxRates.map((rate) => [rate.id, rate]));
+      const taxRateRevisions = requestedTaxRateIds.length
+        ? await tx.taxRateRevision.findMany({ where: { taxRateId: { in: requestedTaxRateIds } } })
+        : [];
+      const taxRateRevisionByVersion = new Map(taxRateRevisions.map((revision) => [`${revision.taxRateId}:${revision.version}`, revision]));
       let subtotal = new Prisma.Decimal(0),
         discountTotal = new Prisma.Decimal(0),
         taxTotal = new Prisma.Decimal(0);
       const items = data.items.map((line) => {
-        const product = products.find((x) => x.id === line.productId)!;
+        const savedProduct = products.find((x) => x.id === line.productId)!;
+        const selectedRate = line.taxRateId ? selectedTaxRateById.get(line.taxRateId) : savedProduct.taxRateSetting;
+        if (line.taxRateId && !selectedRate)
+          throw new BadRequestException('Selected tax rate does not belong to this organization');
+        const rateSnapshot = selectedRate && line.taxRateVersion !== undefined
+          ? selectedRate.version === line.taxRateVersion
+            ? selectedRate
+            : taxRateRevisionByVersion.get(`${selectedRate.id}:${line.taxRateVersion}`)
+          : selectedRate;
+        if (line.taxRateId && line.taxRateVersion !== undefined && !rateSnapshot)
+          throw new BadRequestException('The selected tax rate version is no longer available. Refresh the product list and try again.');
+        const product = { ...savedProduct, taxRate: rateSnapshot?.rate ?? savedProduct.taxRateSetting?.rate ?? savedProduct.taxRate };
         assertSaleQuantity(product, line.quantity);
         const calculated = calculatePosLine(product, line.quantity, line.discount || 0);
         const { base, discount, tax, total, unitDiscount } = calculated;
@@ -844,9 +867,13 @@ export class PosService {
         taxTotal = taxTotal.add(tax);
         return {
           product,
+          taxRateSnapshot: rateSnapshot && selectedRate
+            ? { id: selectedRate.id, version: rateSnapshot.version, name: rateSnapshot.name, rate: rateSnapshot.rate }
+            : null,
           quantity: calculated.quantity,
           unitDiscount,
           discount,
+          tax,
           total,
         };
       });
@@ -943,6 +970,10 @@ export class PosService {
               unitPrice: x.product.salePrice,
               discount: x.discount,
               taxRate: x.product.taxRate,
+              taxRateId: x.taxRateSnapshot?.id ?? null,
+              taxRateVersion: x.taxRateSnapshot?.version ?? null,
+              taxName: x.taxRateSnapshot?.name ?? (Number(x.product.taxRate) > 0 ? 'Custom tax' : 'No tax'),
+              taxAmount: x.tax,
               lineTotal: x.total,
             })),
           },

@@ -7,11 +7,13 @@ import {
   IsBoolean,
   IsISO4217CurrencyCode,
   IsNumber,
+  IsInt,
   IsOptional,
   IsString,
   IsUUID,
   MaxLength,
   Min,
+  Max,
   ValidateNested,
 } from 'class-validator';
 
@@ -20,7 +22,10 @@ export class InvoiceItemDto {
   @ApiProperty() @IsString() @MaxLength(500) description!: string;
   @ApiProperty() @IsNumber({ maxDecimalPlaces: 4 }) @Min(0.0001) quantity!: number;
   @ApiProperty() @IsNumber({ maxDecimalPlaces: 4 }) @Min(0) unitPrice!: number;
-  @ApiProperty({ default: 0 }) @IsNumber({ maxDecimalPlaces: 4 }) @Min(0) taxRate = 0;
+  @ApiPropertyOptional() @IsOptional() @IsUUID() taxRateId?: string;
+  @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsInt() @Min(1) taxRateVersion?: number;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(100) taxName?: string;
+  @ApiProperty({ default: 0 }) @IsNumber({ maxDecimalPlaces: 4 }) @Min(0) @Max(100) taxRate = 0;
 }
 
 export class CreateInvoiceDto {
