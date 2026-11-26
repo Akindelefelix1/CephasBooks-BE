@@ -14,7 +14,7 @@ export class CreateCustomerDto {
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(2000) notes?: string;
   @ApiPropertyOptional({ default: 30, description: 'Payment due period in calendar days; 0 means due on receipt.' })
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) @Max(3650) paymentTermsDays?: number;
-  @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsNumber() @Min(0) creditLimit?: number;
+  @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsNumber({ maxDecimalPlaces: 4 }) @Min(0) creditLimit?: number;
   @ApiPropertyOptional({ description: 'Reason for the initial credit limit.' })
   @IsOptional() @IsString() @MaxLength(1000) creditLimitReason?: string;
 }

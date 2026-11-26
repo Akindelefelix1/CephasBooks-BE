@@ -82,6 +82,7 @@ describe('SalesService', () => {
           total: new Prisma.Decimal(100),
           notes: null,
           items: [{ name: 'Item', description: 'Item', quantity: 1, unitPrice: 100, taxRate: 0 }],
+          customer: { paymentTermsDays: 30 },
         }),
       },
       invoice: {
@@ -100,6 +101,7 @@ describe('SalesService', () => {
 
   it('rejects payments greater than the outstanding invoice balance', async () => {
     const tx = {
+      $executeRaw: jest.fn(),
       invoice: {
         findFirst: jest.fn().mockResolvedValue({
           id: 'invoice',
@@ -128,6 +130,7 @@ describe('SalesService', () => {
   it('rejects a payment when the invoice balance changed after it was selected', async () => {
     const updateMany = jest.fn().mockResolvedValue({ count: 0 });
     const tx = {
+      $executeRaw: jest.fn(),
       invoice: {
         findFirst: jest.fn().mockResolvedValue({
           id: 'invoice',

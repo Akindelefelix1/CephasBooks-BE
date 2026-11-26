@@ -12,6 +12,9 @@ describe('InvoicesService', () => {
       customer: {
         findFirst: jest.fn().mockResolvedValue({ id: 'customer', branchId: null }),
       },
+      organization: {
+        findUniqueOrThrow: jest.fn().mockResolvedValue({ baseCurrency: 'NGN' }),
+      },
       invoice: {
         findMany: jest.fn().mockResolvedValue([]),
         create,
@@ -19,7 +22,7 @@ describe('InvoicesService', () => {
       $transaction: transaction,
     } as never);
 
-    await service.create('org-a', {
+    await service.create('org-a', { id: 'actor-a', role: 'OWNER' }, {
       customerId: 'customer',
       status: 'DRAFT',
       currency: 'NGN',

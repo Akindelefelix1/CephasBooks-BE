@@ -576,7 +576,7 @@ model PosSaleItem {
   taxRate        Decimal  @default(0) @db.Decimal(7, 4)
   taxRateId      String?  @db.Uuid
   taxRateVersion Int?
-  taxName        String   @default("Tax") @db.VarChar(100)
+  taxName        String   @default("No tax") @db.VarChar(100)
   taxAmount      Decimal  @default(0) @db.Decimal(19, 4)
   lineTotal      Decimal  @db.Decimal(19, 4)
   sale           PosSale  @relation(fields: [saleId], references: [id], onDelete: Cascade)
@@ -1071,7 +1071,7 @@ model InvoiceItem {
   taxRate        Decimal  @default(0) @db.Decimal(7, 4)
   taxRateId      String?  @db.Uuid
   taxRateVersion Int?
-  taxName        String   @default("Tax") @db.VarChar(100)
+  taxName        String   @default("No tax") @db.VarChar(100)
   taxAmount      Decimal  @default(0) @db.Decimal(19, 4)
   lineTotal      Decimal  @db.Decimal(19, 4)
   invoice        Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
